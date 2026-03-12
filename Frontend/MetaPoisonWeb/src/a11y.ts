@@ -1,9 +1,4 @@
 /**
- * Accessibility (a11y) utilities
- * Helpers for implementing WCAG 2.1 AA standards
- */
-
-/**
  * Announce a message to screen readers
  * @param message The message to announce
  * @param priority The priority level (polite or assertive)
@@ -16,16 +11,10 @@ export function announceToScreenReader(message: string, priority: "polite" | "as
   }
 }
 
-/**
- * Generate a unique ID for ARIA labels
- */
 export function generateUniqueId(prefix: string = "id"): string {
   return `${prefix}-${Math.random().toString(36).substr(2, 9)}`;
 }
 
-/**
- * Focus management - focus on element with optional announcement
- */
 export function focusElement(element: HTMLElement | null, announce?: string) {
   if (element) {
     element.focus();
@@ -35,24 +24,14 @@ export function focusElement(element: HTMLElement | null, announce?: string) {
   }
 }
 
-/**
- * Format number for accessibility
- * Use spelled-out format for better screen reader experience
- */
 export function formatNumberForA11y(num: number): string {
   return Number.isFinite(num) ? num.toLocaleString() : "-";
 }
 
-/**
- * Format percentage for accessibility
- */
 export function formatPercentageForA11y(percentage: number): string {
   return `${(percentage * 100).toFixed(2)} percent`;
 }
 
-/**
- * Create a label context ID pair
- */
 export function createLabelPair(baseId: string) {
   return {
     labelId: `${baseId}-label`,
@@ -61,28 +40,37 @@ export function createLabelPair(baseId: string) {
   };
 }
 
-/**
- * Keyboard event handler - check if Enter or Space was pressed
- */
 export function isActivationKey(event: React.KeyboardEvent): boolean {
   return event.key === "Enter" || event.key === " ";
 }
 
-/**
- * Keyboard event handler - check if Escape was pressed
- */
 export function isEscapeKey(event: React.KeyboardEvent): boolean {
   return event.key === "Escape";
 }
 
-/**
- * Ensure minimum color contrast between two colors
- * Returns WCAG level (AAA, AA, or fail)
- */
+
 export function getContrastLevel(foreground: string, background: string): "AAA" | "AA" | "fail" {
-  // Simplified implementation - in production, use a library like polished
-  // This is a placeholder that should be enhanced
-  return "AA";
+  // basic WCAG contrast ratio calculation for hex colors
+  function luminance(hex: string) {
+    let c = hex.replace("#", "");
+    if (c.length === 3) c = c.split("").map((x) => x + x).join("");
+    const rgb = [0, 1, 2].map((i) => parseInt(c.substr(i * 2, 2), 16) / 255);
+    const a = rgb.map((v) => {
+      return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * a[0] + 0.7152 * a[1] + 0.0722 * a[2];
+  }
+
+  try {
+    const L1 = luminance(foreground);
+    const L2 = luminance(background);
+    const ratio = (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05);
+    if (ratio >= 7) return "AAA";
+    if (ratio >= 4.5) return "AA";
+    return "fail";
+  } catch {
+    return "AA"; // fallback
+  }
 }
 
 /**

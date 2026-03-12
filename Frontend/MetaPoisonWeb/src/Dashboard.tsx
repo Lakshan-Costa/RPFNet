@@ -24,11 +24,6 @@ type HealthResponse = {
   trained_datasets: string[];
 };
 
-type ThresholdsResponse = {
-  per_dataset: Record<string, number>;
-  global: number;
-};
-
 const API_BASE = "http://localhost:5000";
 const PRESET_TOPK = [50, 100, 150, 300, 500, 1000, 2000];
 
@@ -148,7 +143,6 @@ export default function App() {
   const [err, setErr] = useState<string>("");
   const [loading, setLoading] = useState<boolean>(false);
 
-  const [tau, setTau] = useState<number>(3.5);
   const [tauOverride] = useState<string>("");
   const [datasetHint] = useState<string>("");
   
@@ -156,9 +150,7 @@ export default function App() {
   const [csvUrl, setCsvUrl] = useState<string>("");
 
   const [health, setHealth] = useState<HealthResponse | null>(null);
-  const [thresholds, setThresholds] = useState<ThresholdsResponse | null>(null);
   const [tauLocal, setTauLocal] = useState<number>(0);
-  const [inferredDataset, setInferredDataset] = useState<string>("");
   const [thresholdSource, setThresholdSource] = useState<string>("");
   const [usedTau, setUsedTau] = useState<number>(3.5);
   const [interactiveTau, setInteractiveTau] = useState<number>(3.5);
@@ -178,7 +170,6 @@ export default function App() {
 
   const flagged = useMemo(() => rows.filter((r) => r.score >= interactiveTau), [rows, interactiveTau]);
   const metrics = useMemo(() => computeMetrics(rows, interactiveTau), [rows, interactiveTau]);
-  const labeledMode = rows.some((r) => r.y_true === 0 || r.y_true === 1);
 
   useEffect(() => {
     (async () => {
@@ -186,13 +177,14 @@ export default function App() {
         const resHealth = await fetch(`${API_BASE}/health`);
         const h = await resHealth.json();
         setHealth(h);
-        setTau(h.global_threshold || 3.5);
+        // update thresholds state
         setUsedTau(h.global_threshold || 3.5);
         setInteractiveTau(h.global_threshold || 3.5);
 
-        const resThresholds = await fetch(`${API_BASE}/thresholds`);
-        const t = await resThresholds.json();
-        setThresholds(t);
+        // thresholds endpoint currently unused in UI
+        // const resThresholds = await fetch(`${API_BASE}/thresholds`);
+        // const t = await resThresholds.json();
+        // setThresholds(t);
       } catch (e) {
         console.error("Failed to fetch health/thresholds:", e);
       }
@@ -207,7 +199,8 @@ export default function App() {
     }));
     setRows(newRows);
     setDatasetId(res.dataset_id || null);
-    setInferredDataset(res.uci_id ? `uci_${res.uci_id}` : res.mode || "");
+    // inferred dataset value unused
+    // setInferredDataset(res.uci_id ? `uci_${res.uci_id}` : res.mode || "");
     setThresholdSource(res.threshold_source || "unknown");
     setUsedTau(res.tau);
     setInteractiveTau(res.tau);
