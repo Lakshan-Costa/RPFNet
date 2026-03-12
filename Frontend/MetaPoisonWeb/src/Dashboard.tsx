@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { announceToScreenReader, getStatusAriaLabel } from "./a11y";
-// import Playground from "./Playground.tsx";
 
 type Row = {
   id?: string;
@@ -24,7 +23,7 @@ type HealthResponse = {
   trained_datasets: string[];
 };
 
-const API_BASE = "http://localhost:5000";
+const API_BASE = import.meta.env.VITE_API_BASE;
 const PRESET_TOPK = [50, 100, 150, 300, 500, 1000, 2000];
 
 export function clamp01(n: number) { return Math.max(0, Math.min(1, n)); }
