@@ -814,7 +814,7 @@ class RPFExtractor:
     Block F  [47:55] Regression/Influence Features [NEW]
     """
 
-    DIM = 55
+    DIM = 61
 
     BLOCK_NAMES = {
         "A"  : ("kNN Label Consistency",      slice(0,  8)),

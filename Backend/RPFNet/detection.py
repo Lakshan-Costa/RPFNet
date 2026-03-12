@@ -1,7 +1,8 @@
-META_TRAIN_DATASETS = [
+#detection.py
+RPFNet_TRAIN_DATASETS = [
     "breast_cancer", "wine", "digits",
     "california_large", "adult", "credit_g",
-    # Regression datasets for meta-training
+    # Regression datasets for RPFNet-training
     "california_reg", "diabetes_reg", "boston_reg",
     "ionosphere",          # 34 feat, binary, small n=351
     "spambase",            # 57 feat, binary, n=4601
@@ -58,33 +59,33 @@ REGRESSION_ATTACKS = [
 ]
 
 # RATES        = [0.01, 0.05, 0.10, 0.15, 0.2, 0.25]
-RATES        = [0.05, 0.1, 0.15, 0.2, 0.25]
+RATES        = [0.15]
 ASSUMED_RATE = 0.10
 
-META_MODEL_PATH = "./metapoison_v3_universal.pt"
+RPFNet_MODEL_PATH = "./RPFNet_universal.pt"
 FORCE_RETRAIN   = True
 
-META_TRAIN_ATTACKS = [
+RPFNet_TRAIN_ATTACKS = [
     "label_flip", "tree_aware", "grad_flip", "boundary_flip",
-    "gauss_noise", "interpolation", "targeted_class",
-    "clean_label", "backdoor", "null_feature", "feat_perturb",
-    "backdoor_heavy", "repr_inversion", "dist_shift",
-    "outlier_inject", "feat_dropout",
+    # "gauss_noise", "interpolation", "targeted_class",
+    # "clean_label", "backdoor", "null_feature", "feat_perturb",
+    # "backdoor_heavy", "repr_inversion", "dist_shift",
+    # "outlier_inject", "feat_dropout",
 ]
 
-# Regression attacks added to meta-training
-META_TRAIN_ATTACKS_REG = [
-    "target_shift", "leverage_attack", "target_flip_extreme",
-    "feat_perturb", "backdoor", "repr_inversion",
-    "dist_shift", "feat_dropout", "outlier_inject",
-    "gauss_noise",
+# Regression attacks added to RPFNet-training
+RPFNet_TRAIN_ATTACKS_REG = [
+    # "target_shift", "leverage_attack", "target_flip_extreme",
+    # "feat_perturb", "backdoor", "repr_inversion",
+    # "dist_shift", "feat_dropout", "outlier_inject",
+    # "gauss_noise",
 ]
 
-META_TRAIN_RATES  = [0.05, 0.1, 0.15, 0.2, 0.25]
-META_TRAIN_SEEDS  = 2
-META_EPOCHS       = 30
-META_BATCH_SIZE   = 512
-META_LR           = 1e-3
+RPFNet_TRAIN_RATES  = [ 0.15]
+RPFNet_TRAIN_SEEDS  = 1
+RPFNet_EPOCHS       = 30
+RPFNet_BATCH_SIZE   = 512
+RPFNet_LR           = 1e-3
 EVAL_SEEDS = 2
 
 RPF_K_SMALL  = 5
@@ -111,11 +112,11 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.neighbors import NearestNeighbors, LocalOutlierFactor
 from sklearn.metrics import f1_score, precision_score, recall_score, roc_auc_score
 from sklearn.svm import OneClassSVM
-from Backend.Attack import apply_attack
-from Backend.RPFExtractor import RPFExtractor
-from Backend.Dataset import load_builtin, load_csv
-from Backend.RateEstimator import estimate_contamination_rate, score_distribution_features, RateEstimatorHead
-from Backend.Figures import generate_all_figures
+from RPFNet.Attack import apply_attack
+from RPFNet.RPFExtractor import RPFExtractor
+from RPFNet.Dataset import load_builtin, load_csv
+from RPFNet.RateEstimator import estimate_contamination_rate, score_distribution_features, RateEstimatorHead
+from RPFNet.Figures import generate_all_figures
 try:
     from iTrim.regressiondatapoisoning.src.defenses import defense_both_trim_and_itrim
     from sklearn.linear_model import LinearRegression
@@ -134,7 +135,7 @@ def get_rpf_cached(extractor, X, y, key, y_cont=None):
 
 #  ATTACK TAXONOMY — UPDATED with regression attacks
 
-ATTACK_META = {
+ATTACK_RPFNet = {
     "label_flip"     : ("A. Label flip",           True),
     "tree_aware"     : ("B. Tree-aware + flip",     True),
     "grad_flip"      : ("E. Gradient + flip",       True),
@@ -160,10 +161,18 @@ ATTACK_META = {
     "combo_flip_noise"   : ("R. Combo flip+noise",    True),
     "adaptive_blend"     : ("S. Adaptive blend",      True),
 }
+#Utils
 
-#  RPFNET (input_dim=55)
-class MetaPoisonNet(nn.Module):
-    def __init__(self, input_dim: int = 55,
+def focal_loss(logits, targets, gamma: float = 2.0, pos_weight: float = 4.0):
+    pw  = torch.tensor(pos_weight, device=logits.device, dtype=logits.dtype)
+    bce = F.binary_cross_entropy_with_logits(
+        logits, targets, pos_weight=pw, reduction="none")
+    pt   = torch.exp(-F.binary_cross_entropy_with_logits(
+        logits, targets, reduction="none"))
+    return ((1 - pt) ** gamma * bce).mean()
+#  RPFNET (input_dim=61)
+class RPFNetPoisonNet(nn.Module):
+    def __init__(self, input_dim: int = 61,
                  hidden=(96, 192, 96), dropout: float = 0.2):
         super().__init__()
         layers = []
@@ -182,18 +191,8 @@ class MetaPoisonNet(nn.Module):
     def forward(self, x):
         return self.net(x).squeeze(-1)
 
-
-def focal_loss(logits, targets, gamma: float = 2.0, pos_weight: float = 4.0):
-    pw  = torch.tensor(pos_weight, device=logits.device, dtype=logits.dtype)
-    bce = F.binary_cross_entropy_with_logits(
-        logits, targets, pos_weight=pw, reduction="none")
-    pt   = torch.exp(-F.binary_cross_entropy_with_logits(
-        logits, targets, reduction="none"))
-    return ((1 - pt) ** gamma * bce).mean()
-
-
-#  MetaPoisonDetector
-class MetaPoisonDetector:
+#  RPFNetPoisonDetector
+class RPFNetPoisonDetector:
 
     def __init__(self, device: str = "cpu", epochs: int = 400,
                  batch_size: int = 512, lr: float = 1e-3):
@@ -204,22 +203,22 @@ class MetaPoisonDetector:
         self.extractor  = RPFExtractor(k_small=RPF_K_SMALL,
                                         k_large=RPF_K_LARGE,
                                         cv_folds=RPF_CV_FOLDS)
-        self.net        = MetaPoisonNet(input_dim=RPFExtractor.DIM).to(self.device)
+        self.net        = RPFNetPoisonNet(input_dim=RPFExtractor.DIM).to(self.device)
         self.rate_head  = RateEstimatorHead().to(self.device)
         self._fitted    = False
         self._threshold = 0.5
 
-    def meta_fit(self, datasets: dict, attacks=None, rates=None,
+    def RPFNet_fit(self, datasets: dict, attacks=None, rates=None,
                  seeds: int = 3, verbose: bool = True):
         """
         datasets: dict of name → (X, y) OR name → (X, y, y_cont)
         """
-        if attacks is None: attacks = META_TRAIN_ATTACKS
-        if rates   is None: rates   = META_TRAIN_RATES
+        if attacks is None: attacks = RPFNet_TRAIN_ATTACKS
+        if rates   is None: rates   = RPFNet_TRAIN_RATES
 
         n_combos = len(datasets) * len(attacks) * len(rates) * seeds
         if verbose:
-            print(f"\n[meta-fit] {len(datasets)} datasets × {len(attacks)} attacks × "
+            print(f"\n[RPFNet-fit] {len(datasets)} datasets × {len(attacks)} attacks × "
                   f"{len(rates)} rates × {seeds} seeds = {n_combos} combos")
 
         rpf_pool, label_pool = [], []
@@ -236,7 +235,7 @@ class MetaPoisonDetector:
 
             # Determine which attacks to use
             is_reg = y_cont is not None
-            ds_attacks = (META_TRAIN_ATTACKS_REG if is_reg
+            ds_attacks = (RPFNet_TRAIN_ATTACKS_REG if is_reg
                           else attacks)
 
             for atk in ds_attacks:
@@ -250,7 +249,7 @@ class MetaPoisonDetector:
                             if len(pidx) < 3: continue
                             ytrue       = np.zeros(len(Xp), np.float32)
                             ytrue[pidx] = 1.0
-                            cache_key = ("meta", ds_name, atk, rate, seed)
+                            cache_key = ("RPFNet", ds_name, atk, rate, seed)
                             rpf = get_rpf_cached(self.extractor, Xp, yp,
                                                   cache_key, y_cont=y_cont)
                             rpf_pool.append(rpf)
@@ -260,7 +259,7 @@ class MetaPoisonDetector:
                             if verbose and "Unknown attack" in str(e):
                                 pass  # skip silently
                             elif verbose:
-                                print(f"[META-FIT FAIL] {ds_name}|{atk}|{rate}|{seed}: {e}")
+                                print(f"[RPFNet-FIT FAIL] {ds_name}|{atk}|{rate}|{seed}: {e}")
 
         if not rpf_pool:
             raise RuntimeError("No RPF batches generated.")
@@ -272,7 +271,7 @@ class MetaPoisonDetector:
             print(f"  → {ok} combos  |  "
                   f"pool: {len(X_pool):,} samples  |  "
                   f"poison frac: {y_pool.mean():.3f}  |  {elapsed:.1f}s")
-            print(f"  Phase 2 — Training MetaPoisonNet ({self.epochs} epochs)...")
+            print(f"  Phase 2 — Training RPFNetPoisonNet ({self.epochs} epochs)...")
 
         opt   = torch.optim.AdamW(self.net.parameters(),
                                    lr=self.lr, weight_decay=1e-4)
@@ -324,7 +323,7 @@ class MetaPoisonDetector:
                 y_cont = None
 
             is_reg = y_cont is not None
-            ds_attacks = (META_TRAIN_ATTACKS_REG if is_reg else attacks)
+            ds_attacks = (RPFNet_TRAIN_ATTACKS_REG if is_reg else attacks)
 
             for atk in ds_attacks:
                 for rate_val in rates:
@@ -335,7 +334,7 @@ class MetaPoisonDetector:
                                 seed=seed * 1000 + hash(atk) % 997,
                                 y_cont=y_cont)
                             if len(pidx) < 3: continue
-                            cache_key = ("meta", ds_name, atk, rate_val, seed)
+                            cache_key = ("RPFNet", ds_name, atk, rate_val, seed)
                             rpf   = get_rpf_cached(self.extractor, Xp, yp,
                                                     cache_key, y_cont=y_cont)
                             s     = self._score_rpf(rpf)
@@ -444,11 +443,11 @@ class MetaPoisonDetector:
             "k_large":   self.extractor.k_large,
             "cv_folds":  self.extractor.cv_folds,
             "rpf_dim":   RPFExtractor.DIM,
-            "version":   3,
+            "version":   4,
             "rate_head": self.rate_head.state_dict(),
         }, path)
         n = sum(p.numel() for p in self.net.parameters())
-        print(f"\n[save] MetaPoison v3 → {path}  params={n:,}")
+        print(f"\n[save] RPFNetPoison v3 → {path}  params={n:,}")
 
     def load(self, path):
         ckpt = torch.load(path, map_location=self.device)
@@ -457,7 +456,7 @@ class MetaPoisonDetector:
             raise ValueError(
                 f"Saved model has RPF dim={dim} but current code expects "
                 f"{RPFExtractor.DIM}. Set FORCE_RETRAIN=True to retrain.")
-        self.net = MetaPoisonNet(input_dim=dim).to(self.device)
+        self.net = RPFNetPoisonNet(input_dim=dim).to(self.device)
         self.net.load_state_dict(ckpt["net"])
         self._threshold          = ckpt.get("threshold", 0.5)
         self._fitted             = ckpt.get("fitted", True)
@@ -470,18 +469,12 @@ class MetaPoisonDetector:
             self.rate_head.eval()
         self.net.eval()
         v = ckpt.get("version", 1)
-        print(f"\n[load] MetaPoison v{v} ← {path}  "
+        print(f"\n[load] RPFNetPoison v{v} ← {path}  "
               f"threshold={self._threshold:.4f}  rpf_dim={dim}")
-
-
-# =============================================================================
-#  HybridEnsembleDetector — UPDATED with improved rate estimation
-# =============================================================================
-
 class HybridEnsembleDetector:
 
-    def __init__(self, meta: MetaPoisonDetector, fusion_w: float = 0.55):
-        self.meta      = meta
+    def __init__(self, RPFNet: RPFNetPoisonDetector, fusion_w: float = 0.55):
+        self.RPFNet      = RPFNet
         self.fusion_w  = fusion_w
         self.rate_head = None
 
@@ -489,17 +482,17 @@ class HybridEnsembleDetector:
         iso = IsolationForest(n_estimators=100, random_state=42, n_jobs=-1)
         return (-iso.fit(X).score_samples(X)).astype(np.float32)
 
-    def _rank_fuse(self, meta_s, iso_s, w=None):
+    def _rank_fuse(self, RPFNet_s, iso_s, w=None):
         if w is None: w = self.fusion_w
-        mr = rankdata(meta_s).astype(np.float32) / len(meta_s)
+        mr = rankdata(RPFNet_s).astype(np.float32) / len(RPFNet_s)
         ir = rankdata(iso_s).astype(np.float32)  / len(iso_s)
         return w * mr + (1 - w) * ir
 
     def score(self, X, y, y_cont=None):
-        meta_s, rpf = self.meta.score(X, y, y_cont=y_cont)
+        RPFNet_s, rpf = self.RPFNet.score(X, y, y_cont=y_cont)
         iso_s       = self._iso_scores(X)
-        combined    = self._rank_fuse(meta_s, iso_s)
-        return combined, meta_s, iso_s
+        combined    = self._rank_fuse(RPFNet_s, iso_s)
+        return combined, RPFNet_s, iso_s
 
     def _estimate_rate(self, scores):
         ranked = rankdata(scores).astype(np.float32) / len(scores)
@@ -508,7 +501,7 @@ class HybridEnsembleDetector:
             try:
                 feats = score_distribution_features(ranked)
                 t     = torch.tensor(feats, dtype=torch.float32,
-                                     device=self.meta.device).unsqueeze(0)
+                                     device=self.RPFNet.device).unsqueeze(0)
                 with torch.no_grad():
                     rate = float(self.rate_head(t).item())
                 return float(np.clip(rate, 0.01, 0.40))
@@ -519,7 +512,7 @@ class HybridEnsembleDetector:
 
     def attach_rate_head(self, rate_head):
         self.rate_head = rate_head
-        self.rate_head.to(self.meta.device)
+        self.rate_head.to(self.RPFNet.device)
         self.rate_head.eval()
 
     def predict_adaptive(self, X, y, assumed_rate=ASSUMED_RATE, y_cont=None):
@@ -560,7 +553,7 @@ class HybridEnsembleDetector:
         if verbose:
             print(f"\n  [fusion-cal] Grid search over w ∈ [0.30, 0.75] ...")
 
-        meta_s_list, iso_s_list, y_list = [], [], []
+        RPFNet_s_list, iso_s_list, y_list = [], [], []
 
         for ds_name, ds_val in datasets.items():
             if len(ds_val) == 3:
@@ -586,17 +579,17 @@ class HybridEnsembleDetector:
                             ytrue       = np.zeros(len(Xp), np.float32)
                             ytrue[pidx] = 1.0
                             cache_key = ("fusion", ds_name, atk, rate, seed)
-                            rpf = get_rpf_cached(self.meta.extractor, Xp, yp,
+                            rpf = get_rpf_cached(self.RPFNet.extractor, Xp, yp,
                                                   cache_key, y_cont=y_cont)
-                            ms      = self.meta._score_rpf(rpf)
+                            ms      = self.RPFNet._score_rpf(rpf)
                             iso_s   = self._iso_scores(Xp)
-                            meta_s_list.append(ms)
+                            RPFNet_s_list.append(ms)
                             iso_s_list.append(iso_s)
                             y_list.append(ytrue)
                         except Exception:
                             pass
 
-        if not meta_s_list:
+        if not RPFNet_s_list:
             if verbose: print("  [fusion-cal] No data — keeping default w=0.55")
             return
 
@@ -605,7 +598,7 @@ class HybridEnsembleDetector:
 
         for w in grid:
             f1s = []
-            for ms, iso_s, yt in zip(meta_s_list, iso_s_list, y_list):
+            for ms, iso_s, yt in zip(RPFNet_s_list, iso_s_list, y_list):
                 combined = self._rank_fuse(ms, iso_s, w)
                 k = max(1, int(len(combined) * 0.10))
                 pred = np.zeros(len(combined), dtype=int)
@@ -620,7 +613,7 @@ class HybridEnsembleDetector:
             print(f"  [fusion-cal] Best w={best_w:.2f}  val_F1={best_f1:.4f}")
 
     def save(self, path):
-        self.meta.save(path.replace(".pt", "_base.pt"))
+        self.RPFNet.save(path.replace(".pt", "_base.pt"))
         payload = {"fusion_w": self.fusion_w}
         if self.rate_head is not None:
             payload["rate_head"] = self.rate_head.state_dict()
@@ -628,16 +621,14 @@ class HybridEnsembleDetector:
         print(f"  [fusion] w={self.fusion_w:.2f} → {path}")
 
     def load(self, path):
-        ckpt = torch.load(path, map_location=self.meta.device)
+        ckpt = torch.load(path, map_location=self.RPFNet.device)
         self.fusion_w = ckpt.get("fusion_w", 0.55)
         if "rate_head" in ckpt:
             rh = RateEstimatorHead()
             rh.load_state_dict(ckpt["rate_head"])
             self.attach_rate_head(rh)
 
-
 #  BASELINES
-
 def find_kept_mask(original, cleaned):
     mask = np.zeros(len(original), dtype=bool)
     for i, row in enumerate(original):
@@ -938,7 +929,7 @@ def run_autoencoder_detector(Xp, contamination, seed=42):
     except Exception:
         return None
     
-#  EVALUATION — UPDATED for regression support
+#  EVALUATION
 def _m(yt, yp, s=None):
     return {"F1":  f1_score(yt, yp, zero_division=0),
             "P":   precision_score(yt, yp, zero_division=0),
@@ -946,8 +937,8 @@ def _m(yt, yp, s=None):
             "AUC": roc_auc_score(yt, s) if s is not None else 0.0}
 
 
-def run_one(meta, hybrid, X_tr, y_tr, atk, rate, ds_key="", y_cont=None):
-    label, has_flip = ATTACK_META[atk]
+def run_one(RPFNet, hybrid, X_tr, y_tr, atk, rate, ds_key="", y_cont=None):
+    label, has_flip = ATTACK_RPFNet[atk]
     Xp, yp, pidx    = apply_attack(atk, X_tr, y_tr, fraction=rate, y_cont=y_cont)
     ytrue           = np.zeros(len(Xp)); ytrue[pidx] = 1
 
@@ -955,8 +946,8 @@ def run_one(meta, hybrid, X_tr, y_tr, atk, rate, ds_key="", y_cont=None):
         return None
 
     cache_key = ("eval", ds_key, atk, rate)
-    rpf = get_rpf_cached(meta.extractor, Xp, yp, cache_key, y_cont=y_cont)
-    scores_m = meta._score_rpf(rpf)
+    rpf = get_rpf_cached(RPFNet.extractor, Xp, yp, cache_key, y_cont=y_cont)
+    scores_m = RPFNet._score_rpf(rpf)
 
     est_rate = estimate_contamination_rate(scores_m)
     k_unk = max(1, int(len(scores_m) * est_rate))
@@ -1007,13 +998,13 @@ def run_one(meta, hybrid, X_tr, y_tr, atk, rate, ds_key="", y_cont=None):
     ae_kno = run_autoencoder_detector(Xp, rate)
 
     unk = {
-        "MetaPoisonV3": _m(ytrue, pred_unk_m, scores_m),
+        "RPFNet": _m(ytrue, pred_unk_m, scores_m),
         "Hybrid":       _m(ytrue, pred_unk_h, scores_h),
         "IsoForest":    _m(ytrue, iso_unk)
     }
 
     kno = {
-        "MetaPoisonV3": _m(ytrue, pred_kno_m, scores_m),
+        "RPFNet": _m(ytrue, pred_kno_m, scores_m),
         "Hybrid":       _m(ytrue, pred_kno_h, scores_h),
         "IsoForest":    _m(ytrue, iso_kno)
     }
@@ -1040,8 +1031,8 @@ def run_one(meta, hybrid, X_tr, y_tr, atk, rate, ds_key="", y_cont=None):
         "hybrid_pred_unknown": pred_unk_h
     }
 
-#  ABLATION (unchanged logic, updated for v3 blocks)
-def ablation_study(meta, X_tr, y_tr, attacks, rate=0.10, n_trials=3, y_cont=None):
+#  ABLATION
+def ablation_study(RPFNet, X_tr, y_tr, attacks, rate=0.10, n_trials=3, y_cont=None):
     drops = {b: [] for b in RPFExtractor.BLOCK_NAMES}
     for trial in range(n_trials):
         for atk in attacks:
@@ -1053,15 +1044,15 @@ def ablation_study(meta, X_tr, y_tr, attacks, rate=0.10, n_trials=3, y_cont=None
                 ytrue = np.zeros(len(Xp)); ytrue[pidx] = 1
                 k     = max(1, int(len(Xp) * rate))
 
-                rpf_full  = meta.extractor.extract(Xp, yp, y_cont=y_cont)
-                sc_full   = meta._score_rpf(rpf_full)
+                rpf_full  = RPFNet.extractor.extract(Xp, yp, y_cont=y_cont)
+                sc_full   = RPFNet._score_rpf(rpf_full)
                 pred_full = np.zeros(len(Xp), dtype=int)
                 pred_full[np.argsort(sc_full)[-k:]] = 1
                 f1_full   = f1_score(ytrue, pred_full, zero_division=0)
 
                 for block in RPFExtractor.BLOCK_NAMES:
-                    rpf_m  = meta.ablate_block(rpf_full, block)
-                    sc_m   = meta._score_rpf(rpf_m)
+                    rpf_m  = RPFNet.ablate_block(rpf_full, block)
+                    sc_m   = RPFNet._score_rpf(rpf_m)
                     pred_m = np.zeros(len(Xp), dtype=int)
                     pred_m[np.argsort(sc_m)[-k:]] = 1
                     f1_m   = f1_score(ytrue, pred_m, zero_division=0)
@@ -1108,27 +1099,27 @@ def print_result(atk, rate, res):
                 # SINGLE properly formatted column
                 print(f"  {v:>6.4f}±{std:<6.4f}{star}{fail}", end="")
             print()
-        f1h = r.get("Hybrid", r.get("MetaPoisonV3", {})).get("F1_mean", 0.)
+        f1h = r.get("Hybrid", r.get("RPFNet", {})).get("F1_mean", 0.)
         print(f"  │  Hybrid visual    {_bar(f1h)}  {f1h:.3f}")
     print(f"  └{'─'*68}")
 
 def significance_test(ds_res, mode_key="unknown"):
-    meta_vals = []
+    RPFNet_vals = []
     hybrid_vals = []
 
     for res in ds_res.values():
         if res is None:
             continue
 
-        if "MetaPoisonV3" in res[mode_key] and "Hybrid" in res[mode_key]:
-            meta_vals.extend(res[mode_key]["MetaPoisonV3"]["F1_all"])
+        if "RPFNet" in res[mode_key] and "Hybrid" in res[mode_key]:
+            RPFNet_vals.extend(res[mode_key]["RPFNet"]["F1_all"])
             hybrid_vals.extend(res[mode_key]["Hybrid"]["F1_all"])
 
-    if len(meta_vals) > 1:
-        t_stat, p_t = ttest_rel(hybrid_vals, meta_vals)
-        w_stat, p_w = wilcoxon(hybrid_vals, meta_vals)
+    if len(RPFNet_vals) > 1:
+        t_stat, p_t = ttest_rel(hybrid_vals, RPFNet_vals)
+        w_stat, p_w = wilcoxon(hybrid_vals, RPFNet_vals)
 
-        print(f"\n  Statistical Test (Hybrid vs MetaPoisonV3):")
+        print(f"\n  Statistical Test (Hybrid vs RPFNetPoisonV3):")
         print(f"    Paired t-test p-value      : {p_t:.4e}")
         print(f"    Wilcoxon signed-rank p-val : {p_w:.4e}")
         
@@ -1428,17 +1419,17 @@ if __name__ == "__main__":
     W = 82
 
     print("=" * W)
-    print("  MetaPoison v3: Universal Poison Detection + Regression Support")
-    print(f"  RPF dims : {RPFExtractor.DIM}  (v3=55, +Block E Influence)")
+    print("  RPFNetPoison v3: Universal Poison Detection + Regression Support")
+    print(f"  RPF dims : {RPFExtractor.DIM}  (v4=61, +Block G Structural Echo)")
     print(f"  Device   : {device}   Attacks: {len(ATTACKS)}   Rates: {RATES}")
-    print(f"  Model    : {META_MODEL_PATH}")
-    print(f"  Meta-train datasets: {len(META_TRAIN_DATASETS)} (expanded for OOD generalization)")
+    print(f"  Model    : {RPFNet_MODEL_PATH}")
+    print(f"  RPFNet-train datasets: {len(RPFNet_TRAIN_DATASETS)} (expanded for OOD generalization)")
     print("=" * W)
 
-    # Load meta-training datasets
-    print(f"\n  Meta-training datasets: {META_TRAIN_DATASETS}")
-    meta_data = {}
-    for bname in META_TRAIN_DATASETS:
+    # Load RPFNet-training datasets
+    print(f"\n  RPFNet-training datasets: {RPFNet_TRAIN_DATASETS}")
+    RPFNet_data = {}
+    for bname in RPFNet_TRAIN_DATASETS:
         try:
             result = load_builtin(bname)
             Xtr = result[0]
@@ -1446,38 +1437,38 @@ if __name__ == "__main__":
             is_reg = result[6]
             y_cont = result[7]
             if is_reg and y_cont is not None:
-                meta_data[bname] = (Xtr, ytr, y_cont)
+                RPFNet_data[bname] = (Xtr, ytr, y_cont)
             else:
-                meta_data[bname] = (Xtr, ytr)
+                RPFNet_data[bname] = (Xtr, ytr)
         except Exception as e:
             print(f"  ⚠ {bname}: {e}")
 
-    if not meta_data:
-        raise RuntimeError("No meta-training datasets loaded.")
+    if not RPFNet_data:
+        raise RuntimeError("No RPFNet-training datasets loaded.")
 
-    print(f"\n  Successfully loaded {len(meta_data)}/{len(META_TRAIN_DATASETS)} "
-          f"meta-training datasets")
+    print(f"\n  Successfully loaded {len(RPFNet_data)}/{len(RPFNet_TRAIN_DATASETS)} "
+          f"RPFNet-training datasets")
 
     # Train or load
-    meta_det = MetaPoisonDetector(device=device, epochs=META_EPOCHS,
-                                   batch_size=META_BATCH_SIZE, lr=META_LR)
-    hybrid_det = HybridEnsembleDetector(meta_det)
-    fusion_path = META_MODEL_PATH.replace(".pt", "_fusion.pt")
+    RPFNet_det = RPFNetPoisonDetector(device=device, epochs=RPFNet_EPOCHS,
+                                   batch_size=RPFNet_BATCH_SIZE, lr=RPFNet_LR)
+    hybrid_det = HybridEnsembleDetector(RPFNet_det)
+    fusion_path = RPFNet_MODEL_PATH.replace(".pt", "_fusion.pt")
 
-    if not FORCE_RETRAIN and os.path.exists(META_MODEL_PATH):
-        meta_det.load(META_MODEL_PATH)
+    if not FORCE_RETRAIN and os.path.exists(RPFNet_MODEL_PATH):
+        RPFNet_det.load(RPFNet_MODEL_PATH)
         if os.path.exists(fusion_path):
             hybrid_det.load(fusion_path)
         else:
-            hybrid_det.calibrate_fusion_weight(meta_data, verbose=True)
+            hybrid_det.calibrate_fusion_weight(RPFNet_data, verbose=True)
     else:
-        print(f"\n  Meta-training on: {list(meta_data.keys())}")
-        meta_det.meta_fit(meta_data, attacks=META_TRAIN_ATTACKS,
-                          rates=META_TRAIN_RATES, seeds=META_TRAIN_SEEDS,
+        print(f"\n  RPFNet-training on: {list(RPFNet_data.keys())}")
+        RPFNet_det.RPFNet_fit(RPFNet_data, attacks=RPFNet_TRAIN_ATTACKS,
+                          rates=RPFNet_TRAIN_RATES, seeds=RPFNet_TRAIN_SEEDS,
                           verbose=True)
-        meta_det.save(META_MODEL_PATH)
-        hybrid_det.attach_rate_head(meta_det.rate_head)
-        hybrid_det.calibrate_fusion_weight(meta_data, verbose=True)
+        RPFNet_det.save(RPFNet_MODEL_PATH)
+        hybrid_det.attach_rate_head(RPFNet_det.rate_head)
+        hybrid_det.calibrate_fusion_weight(RPFNet_data, verbose=True)
         hybrid_det.save(fusion_path)
 
     # Build eval set
@@ -1492,7 +1483,7 @@ if __name__ == "__main__":
             eval_ds[bname] = {
                 "display":       bname.replace("_", " ").title(),
                 "X_tr": Xtr, "y_tr": ytr,
-                "zero_shot":     bname not in META_TRAIN_DATASETS,
+                "zero_shot":     bname not in RPFNet_TRAIN_DATASETS,
                 "is_regression": is_reg,
                 "y_cont":        y_cont,
             }
@@ -1541,10 +1532,10 @@ if __name__ == "__main__":
 
         ds_res = {}
         for atk in ds_attacks:
-            if atk not in ATTACK_META:
+            if atk not in ATTACK_RPFNet:
                 continue
             for rate in RATES:
-                label, has_flip = ATTACK_META[atk]
+                label, has_flip = ATTACK_RPFNet[atk]
                 tag = "" if has_flip else " [no-flip]"
                 print(f"\n  {label} @ {rate:.0%}{tag}... ", end="", flush=True)
                 try:
@@ -1553,7 +1544,7 @@ if __name__ == "__main__":
                     for s in range(EVAL_SEEDS):
                         try:
                             res_s = run_one(
-                                meta_det, hybrid_det,
+                                RPFNet_det, hybrid_det,
                                 Xtr, ytr, atk, rate,
                                 ds_key=f"{ds_key}_seed{s}",
                                 y_cont=y_cont
@@ -1571,9 +1562,9 @@ if __name__ == "__main__":
                     ds_res[(atk, rate)] = res
                     if res:
                         f1h = res["unknown"]["Hybrid"]["F1_mean"]
-                        f1m = res["unknown"]["MetaPoisonV3"]["F1_mean"]
+                        f1m = res["unknown"]["RPFNet"]["F1_mean"]
                         f1i = res["unknown"]["IsoForest"]["F1_mean"]
-                        print(f"Hybrid={f1h:.3f}  Meta={f1m:.3f}  Iso={f1i:.3f}")
+                        print(f"Hybrid={f1h:.3f}  RPFNet={f1m:.3f}  Iso={f1i:.3f}")
                         print_result(atk, rate, res)
                     else:
                         print("SKIPPED")
@@ -1598,18 +1589,21 @@ if __name__ == "__main__":
             abl_attacks = (["feat_perturb", "repr_inversion", "dist_shift"]
                            if is_reg else
                            ["label_flip", "feat_perturb", "repr_inversion", "dist_shift"])
-            abl = ablation_study(meta_det, Xtr, ytr, abl_attacks,
+            abl = ablation_study(RPFNet_det, Xtr, ytr, abl_attacks,
                                   rate=0.10, y_cont=y_cont)
             print(f"  {'Block':>8}  {'Description':<32}  {'F1 drop':>8}  Importance")
             print(f"  {'─'*70}")
             for bk, (bdesc, _) in RPFExtractor.BLOCK_NAMES.items():
                 drop = abl.get(bk, 0.)
                 bar  = "█" * max(0, int(drop * 50)) if drop > 0 else "─"
-                flag = " ← NEW" if bk == "E" else ""
+                flag = ""
                 print(f"  Block {bk:>2}  {bdesc[:32]:<32}  {drop:>+.4f}  {bar}{flag}")
         except Exception as e:
             print(f"  (ablation failed: {e})")
 
     # Grand summary
     print_grand_summary(grand_results, eval_ds)
-    generate_all_figures(grand_results, eval_ds, meta_det, hybrid_det)
+    generate_all_figures(grand_results, eval_ds, RPFNet_det, hybrid_det)
+
+
+

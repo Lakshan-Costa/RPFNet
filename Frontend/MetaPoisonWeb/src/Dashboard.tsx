@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { announceToScreenReader, generateUniqueId, getStatusAriaLabel } from "./a11y";
+import { announceToScreenReader, getStatusAriaLabel } from "./a11y";
 // import Playground from "./Playground.tsx";
 
 type Row = {
@@ -9,15 +9,6 @@ type Row = {
   y_true?: number;
   flagged?: number;
 };
-
-// type SuspiciousRow = {
-//   id?: string;
-//   score: number;
-//   flagged?: number;
-//   features?: Record<string, number | string>;
-//   [key: string]: any;
-// };
-
 
 type Metrics = {
   TP: number; FP: number; TN: number; FN: number;
@@ -41,9 +32,9 @@ type ThresholdsResponse = {
 const API_BASE = "http://localhost:5000";
 const PRESET_TOPK = [50, 100, 150, 300, 500, 1000, 2000];
 
-function clamp01(n: number) { return Math.max(0, Math.min(1, n)); }
+export function clamp01(n: number) { return Math.max(0, Math.min(1, n)); }
 
-function computeMetrics(rows: Row[], thr: number): Metrics | null {
+export function computeMetrics(rows: Row[], thr: number): Metrics | null {
   const labeled = rows.some((r) => r.y_true === 0 || r.y_true === 1);
   if (!labeled) return null;
 
@@ -66,7 +57,7 @@ function computeMetrics(rows: Row[], thr: number): Metrics | null {
   return { TP, FP, TN, FN, precision, recall, f1, tpr, fpr, acc };
 }
 
-function quantile(values: number[], q: number): number {
+export function quantile(values: number[], q: number): number {
   if (values.length === 0) return 0;
   const sorted = [...values].sort((a, b) => a - b);
   const pos = (sorted.length - 1) * clamp01(q);

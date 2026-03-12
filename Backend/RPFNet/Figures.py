@@ -24,10 +24,10 @@ from sklearn.datasets import (load_breast_cancer, load_wine, load_digits,
                                fetch_california_housing, fetch_openml,
                                make_classification, make_moons, make_circles,
                                make_friedman1, make_regression)
-from Backend.Attack import apply_attack
-from Backend.RPFExtractor import RPFExtractor
-from Backend.Dataset import load_builtin, load_csv
-from Backend.RateEstimator import estimate_contamination_rate, score_distribution_features, RateEstimatorHead
+from RPFNet.Attack import apply_attack
+from RPFNet.RPFExtractor import RPFExtractor
+from RPFNet.Dataset import load_builtin, load_csv
+from RPFNet.RateEstimator import estimate_contamination_rate, score_distribution_features, RateEstimatorHead
 
 import matplotlib
 matplotlib.use("Agg")

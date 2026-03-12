@@ -1,0 +1,4 @@
+global-include *.py, *.txt, *.pt
+include RPFNet/RPFNet_universal.pt
+include RPFNet/RPFNet_universal_fusion.pt
+include RPFNet/RPFNet_universal_fusion_base.pt

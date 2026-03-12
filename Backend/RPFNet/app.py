@@ -1,3 +1,4 @@
+#app.py
 """
 MetaPoison v2/v3 — Flask Backend  (FIXED v3)
 =============================================
@@ -35,7 +36,10 @@ POST /analyze_csv      multipart: file, tau?, dataset_hint?
 POST /analyze_uci      json:      { uci_id, tau? }
 POST /analyze_url      json:      { url, tau?, dataset_hint? }
 POST /export_clean     json:      { dataset_id, clean_ids[] }
+POST /analyze_stream
 """
+
+from __future__ import annotations
 
 import io
 import os
@@ -54,41 +58,42 @@ from scipy.stats import rankdata
 from sklearn.ensemble import IsolationForest
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
-
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 warnings.filterwarnings("ignore")
 
 # ── Import MetaPoison
-from Attack import apply_attack
-from RPFExtractor import RPFExtractor
-from Dataset import load_builtin, load_csv
-from RateEstimator import estimate_contamination_rate, score_distribution_features, RateEstimatorHead
+from RPFNet.Attack import apply_attack
+from RPFNet.RPFExtractor import RPFExtractor
+from RPFNet.Dataset import load_builtin, load_csv
+from RPFNet.RateEstimator import estimate_contamination_rate, score_distribution_features, RateEstimatorHead
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 try:
-    from detectionold import (
-        MetaPoisonDetector,
+    from detection import (
+        RPFNetPoisonDetector,
         HybridEnsembleDetector,
         RPFExtractor,
-        META_MODEL_PATH,
-        META_EPOCHS,
-        META_BATCH_SIZE,
-        META_LR,
+        RPFNet_MODEL_PATH,
+        RPFNet_EPOCHS,
+        RPFNet_BATCH_SIZE,
+        RPFNet_LR,
         estimate_contamination_rate,
         score_distribution_features,
         RateEstimatorHead,
     )
     # These are needed for backward-compat model loading (v3 detection.py)
     try:
-        from detection import MetaPoisonNet, RPF_K_SMALL, RPF_K_LARGE, RPF_CV_FOLDS
+        from detection import RPFNetPoisonNet, RPF_K_SMALL, RPF_K_LARGE, RPF_CV_FOLDS
     except ImportError:
-        MetaPoisonNet = None
+        RPFNetPoisonNet = None
         RPF_K_SMALL, RPF_K_LARGE, RPF_CV_FOLDS = 5, 15, 5
     MODEL_AVAILABLE = True
     MODEL_IMPORT_ERR = None
 except Exception as _e:
     MODEL_AVAILABLE = False
     MODEL_IMPORT_ERR = str(_e)
-    META_MODEL_PATH = "./metapoison_v2_universal.pt"
-    MetaPoisonNet = None
+    RPFNet_MODEL_PATH = "./RPFNet/RPFNet_universal.pt"
+    RPFNetPoisonNet = None
     RPF_K_SMALL, RPF_K_LARGE, RPF_CV_FOLDS = 5, 15, 5
 
 # ── App ───────────────────────────────────────────────────────────────────────
@@ -100,14 +105,15 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 # ── Global model state ────────────────────────────────────────────────────────
 _lock = threading.Lock()
-_meta:   MetaPoisonDetector   | None = None
-_hybrid: HybridEnsembleDetector | None = None
+_meta:   "RPFNetPoisonDetector"   | None = None
+_hybrid: "HybridEnsembleDetector" | None = None
 _loaded = False
 
 DATASET_STORE: dict[str, pd.DataFrame] = {}
 DATASET_THRESHOLDS: dict[str, float] = {}
 GLOBAL_THRESHOLD_DEFAULT = 3.5
-
+STREAM_SESSIONS = {}
+limiter = Limiter(get_remote_address, app=app, default_limits=["10 per minute"])
 
 def _global_threshold() -> float:
     if DATASET_THRESHOLDS:
@@ -143,12 +149,12 @@ def _load_model_compat(meta, path):
     except TypeError:
         # Older PyTorch without weights_only param
         ckpt = torch.load(path, map_location=meta.device)
-    saved_dim = ckpt.get("rpf_dim", 47)
+    saved_dim = ckpt.get("rpf_dim", 61)
     print(f"[backend]   saved_dim={saved_dim}  current_dim={RPFExtractor.DIM}")
 
     # Rebuild net with the SAVED dimension
     # MetaPoisonNet might not be importable from older detection.py
-    _NetClass = MetaPoisonNet if MetaPoisonNet is not None else type(meta.net)
+    _NetClass = RPFNetPoisonNet if RPFNetPoisonNet is not None else type(meta.net)
     meta.net = _NetClass(input_dim=saved_dim).to(meta.device)
     meta.net.load_state_dict(ckpt["net"])
     meta._threshold = ckpt.get("threshold", 0.5)
@@ -187,21 +193,16 @@ def _load_model() -> None:
         return
     try:
         device = "cuda" if torch.cuda.is_available() else "cpu"
-        meta = MetaPoisonDetector(
-            device=device, epochs=META_EPOCHS,
-            batch_size=META_BATCH_SIZE, lr=META_LR,
+        meta = RPFNetPoisonDetector(
+            device=device, epochs=RPFNet_EPOCHS,
+            batch_size=RPFNet_BATCH_SIZE, lr=RPFNet_LR,
         )
 
         # ◆ FIX 6b: Try multiple model paths (v3 then v2)
         model_path = None
         candidates = [
-            META_MODEL_PATH,
-            META_MODEL_PATH.replace("_v3_", "_v2_"),
-            META_MODEL_PATH.replace("_v2_", "_v3_"),
-            "./metapoison_v3_universal.pt",
-            "./metapoison_v2_universal.pt",
-            "../metapoison_v3_universal.pt",
-            "../metapoison_v2_universal.pt",
+            RPFNet_MODEL_PATH,
+            "./RPFNet/RPFNet_Universal.pt",
         ]
         seen = set()
         for p in candidates:
@@ -593,8 +594,8 @@ def health():
         "trained_datasets":          list(DATASET_THRESHOLDS.keys()),
         "model_available":           MODEL_AVAILABLE,
         "model_loaded":              _loaded,
-        "model_path":                META_MODEL_PATH,
-        "model_exists":              os.path.exists(META_MODEL_PATH),
+        "model_path":                RPFNet_MODEL_PATH,
+        "model_exists":              os.path.exists(RPFNet_MODEL_PATH),
         "import_error":              MODEL_IMPORT_ERR,
         "rpf_dim_loaded":            _LOADED_RPF_DIM,
         "rpf_dim_code":              RPFExtractor.DIM if MODEL_AVAILABLE else None,
@@ -612,8 +613,22 @@ def thresholds():
         "global":      _global_threshold(),
     })
 
+@app.route("/stream/start", methods=["POST"])
+def start_stream():
+    stream_id = str(uuid.uuid4())
+
+    STREAM_SESSIONS[stream_id] = {
+        "buffer": [],
+        "window_size": 200,
+        "scaler": StandardScaler(),
+        "initialized": False,
+        "model": None
+    }
+
+    return jsonify({"stream_id": stream_id})
 
 @app.route("/analyze_csv", methods=["POST"])
+@limiter.limit("5 per minute")
 def analyze_csv():
     if "file" not in request.files:
         return jsonify({"error": "No file uploaded"}), 400
@@ -647,6 +662,7 @@ def analyze_csv():
 
 
 @app.route("/analyze_uci", methods=["POST"])
+@limiter.limit("5 per minute")
 def analyze_uci():
     body = request.get_json(silent=True) or {}
     uci_id = body.get("uci_id")
@@ -684,6 +700,7 @@ def analyze_uci():
 
 
 @app.route("/analyze_url", methods=["POST"])
+@limiter.limit("5 per minute")
 def analyze_url():
     body = request.get_json(silent=True) or {}
     url  = (body.get("url") or "").strip()
@@ -722,6 +739,59 @@ def analyze_url():
 
     return jsonify(result)
 
+@app.route("/analyze_stream", methods=["POST"])
+@limiter.limit("5 per minute")
+def analyze_stream():
+
+    body = request.get_json()
+    stream_id = body.get("stream_id")
+    sample = body.get("sample")
+
+    if stream_id not in STREAM_SESSIONS:
+        return jsonify({"error": "Invalid stream_id"}), 400
+
+    session = STREAM_SESSIONS[stream_id]
+    session["buffer"].append(sample)
+
+    # keep sliding window
+    if len(session["buffer"]) > session["window_size"]:
+        session["buffer"].pop(0)
+
+    X = np.array(session["buffer"], dtype=np.float32)
+
+    # need enough samples first
+    if len(X) < 20:
+        return jsonify({
+            "status": "warming_up",
+            "n_samples": len(X)
+        })
+
+    # scale
+    scaler = session["scaler"]
+    X_scaled = scaler.fit_transform(X)
+
+    # ── Train model only once during warmup ──
+    if not session["initialized"]:
+        iso = IsolationForest(n_estimators=200, random_state=42)
+        iso.fit(X_scaled)
+
+        session["model"] = iso
+        session["initialized"] = True
+
+    # ── Use trained model for scoring ──
+    iso = session["model"]
+
+    scores = -iso.score_samples(X_scaled)
+    newest_score = scores[-1]
+
+    tau = _compute_tau_local(scores)
+    flag = int(newest_score >= tau)
+
+    return jsonify({
+        "score": float(newest_score),
+        "threshold": float(tau),
+        "poison_flag": flag
+    })
 
 @app.route("/export_clean", methods=["POST"])
 def export_clean():
@@ -758,7 +828,7 @@ def export_clean():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     print(f"[backend] Starting on http://0.0.0.0:{port}")
-    print(f"[backend] MetaPoison model: {META_MODEL_PATH}")
+    print(f"[backend] RPFNet model: {RPFNet_MODEL_PATH}")
     print(f"[backend] Model available:  {MODEL_AVAILABLE}")
     if not MODEL_AVAILABLE:
         print(f"[backend] Import error: {MODEL_IMPORT_ERR}")
