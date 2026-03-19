@@ -5,6 +5,8 @@ setup.py
 RPFNet/Attack.py
 RPFNet/Dataset.py
 RPFNet/Figures.py
+RPFNet/InvariantAnalyzer.py
+RPFNet/InvariantFigures.py
 RPFNet/RPFExtractor.py
 RPFNet/RPFNet_universal.pt
 RPFNet/RPFNet_universal_fusion.pt
@@ -14,7 +16,7 @@ RPFNet/__init__.py
 RPFNet/api.py
 RPFNet/app.py
 RPFNet/detection.py
-RPFNet/detectionold.py
+RPFNet/main_invariant_integration.py
 RPFNet/testapi.py
 rpfnet.egg-info/PKG-INFO
 rpfnet.egg-info/SOURCES.txt

@@ -21,3 +21,11 @@ Change Log
 -----------------------
 - Updated readme
 - Updated API file
+
+0.1.2 (13/03/2026)
+-----------------------
+- Model files updated
+
+0.1.4 (16/03/2026)
+-----------------------
+- Updated analyze output

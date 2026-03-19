@@ -1,6 +1,6 @@
 Metadata-Version: 2.1
 Name: rpfnet
-Version: 0.1.1
+Version: 0.1.4
 Summary: RPFNet: Attack-Agnostic Tabular Data Poisoning Detection via Meta-Learned Relational Fingerprints
 Home-page: https://github.com/lakshancosta/RPFNet
 Author: Lakshan Costa
@@ -90,23 +90,21 @@ For real-time or incremental data pipelines, RPFNet supports row-by-row streamin
 import pandas as pd
 from RPFNet import api
 
-df = pd.read_csv('dataset.csv')
-split = int(len(df) * 0.8)
+# Existing dataset â€” used as baseline
+existing = pd.read_csv('dataset.csv')
+api.analyze('stream', existing)
 
-# Step 1 - initialise with a baseline
-api.analyze('stream', df.iloc[:split])
-
-# Step 2 - score new rows as they arrive
-for _, row in df.iloc[split:].iterrows():
+# New rows scored against that baseline
+for _, row in new_data.iterrows():
     result = api.analyze('stream', row)
 
     if result['status'] == 'warming_up':
-        continue  # not enough data yet
+        continue
 
     if result['poison_flag']:
         print(f"Poisoned row detected! score={result['score']:.4f}")
 
-# Step 3 - export clean rows from the buffer
+# Export clean rows from the buffer
 clean_df = api.clean('stream')
 print(f"Clean rows in buffer: {len(clean_df)}")
 

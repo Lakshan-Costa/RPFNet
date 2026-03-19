@@ -776,6 +776,61 @@ def _stream_status() -> dict:
         "window_size": _stream.window_size,
     }
 
+class AnalysisReport:
+
+    def __init__(self, data: dict):
+        self._data = data
+
+    def summary(self):
+        s = self._data
+
+        print("\nRPFNet Poison Analysis")
+        print("──────────────────────")
+        print(f"Rows analyzed     : {s['n_rows']}")
+        print(f"Flagged samples   : {s['n_flagged']} ({s['pct_flagged']}%)")
+        print(f"Estimated poison  : {s['estimated_rate']*100:.2f}%")
+        print(f"Mode              : {s['mode']}")
+        print(f"Bimodal           : {s['bimodal']}")
+        print()
+
+        stats = s["score_stats"]
+        print("Score statistics")
+        print(
+            f"min={stats['min']}  "
+            f"p25={stats['p25']}  "
+            f"median={stats['p50']}  "
+            f"p75={stats['p75']}  "
+            f"p95={stats['p95']}  "
+            f"max={stats['max']}"
+        )
+
+        if s["flagged_indices"]:
+            print("\nFlagged indices:", s["flagged_indices"])
+        else:
+            print("\nNo poisoned samples detected.")
+
+    def dataframe(self):
+        return self._data["dataframe"]
+
+    def clean(self):
+        df = self._data["dataframe"]
+        return df[df["_poison_flag"] == 0].drop(columns=["_poison_flag","_poison_score"])
+
+    def flagged(self):
+        df = self._data["dataframe"]
+        return df[df["_poison_flag"] == 1]
+
+    def raw(self):
+        return self._data
+
+    def __repr__(self):
+        s = self._data
+        return (
+            f"<RPFNet Report rows={s['n_rows']} "
+            f"flagged={s['n_flagged']} "
+            f"({s['pct_flagged']}%) "
+            f"mode={s['mode']}>"
+        )
 
 # ═════════════════════════════════════════════════════════════════════════════
 # PUBLIC API
@@ -835,7 +890,7 @@ def analyze(
         df = _load_csv(dataset)
         if len(df) < 5:
             raise ValueError(f"Dataset too small ({len(df)} rows). Need >= 5.")
-        return _score_dataframe(df)
+        return AnalysisReport(_score_dataframe(df))
 
     if source == "uci":
         if not isinstance(dataset, int):
@@ -843,7 +898,7 @@ def analyze(
         df = _load_uci(dataset)
         if len(df) < 5:
             raise ValueError(f"Dataset too small ({len(df)} rows). Need >= 5.")
-        return _score_dataframe(df)
+        return AnalysisReport(_score_dataframe(df))
 
     if source == "url":
         if not isinstance(dataset, str):
@@ -851,7 +906,7 @@ def analyze(
         df = _load_url(dataset)
         if len(df) < 5:
             raise ValueError(f"Dataset too small ({len(df)} rows). Need >= 5.")
-        return _score_dataframe(df)
+        return AnalysisReport(_score_dataframe(df))
 
     # ── Stream ────────────────────────────────────────────────────────────────
     if source == "stream":
@@ -931,7 +986,12 @@ def clean(
     if dataset is None:
         raise TypeError(f"dataset is required for source='{source}'")
 
-    result   = analyze(source, dataset)
+    result = analyze(source, dataset)
+
+    if isinstance(result, AnalysisReport):
+        return result.clean()
+
+    # fallback (if dict returned in future)
     original = result["dataframe"].drop(
         columns=["_poison_score", "_poison_flag"], errors="ignore"
     )

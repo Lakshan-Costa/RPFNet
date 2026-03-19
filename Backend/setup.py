@@ -10,7 +10,7 @@ classifiers = [
 
 setup(
     name="rpfnet",
-    version="0.1.1",
+    version="0.1.4",
     description="RPFNet: Attack-Agnostic Tabular Data Poisoning Detection via Meta-Learned Relational Fingerprints",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",

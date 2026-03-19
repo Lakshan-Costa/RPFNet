@@ -61,7 +61,7 @@ from sklearn.preprocessing import StandardScaler
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 warnings.filterwarnings("ignore")
-
+from RPFNet.InvariantAnalyzer import InvariantAnalyzer
 # ── Import MetaPoison
 from RPFNet.Attack import apply_attack
 from RPFNet.RPFExtractor import RPFExtractor
@@ -108,6 +108,7 @@ _lock = threading.Lock()
 _meta:   "RPFNetPoisonDetector"   | None = None
 _hybrid: "HybridEnsembleDetector" | None = None
 _loaded = False
+_invariant_analyzer = InvariantAnalyzer(alpha=0.05)
 
 DATASET_STORE: dict[str, pd.DataFrame] = {}
 DATASET_THRESHOLDS: dict[str, float] = {}
@@ -557,9 +558,46 @@ def _score_dataframe(df: pd.DataFrame, tau_override: float | None = None,
     n_flagged = sum(flags)
     pct_flagged = round(n_flagged / n * 100, 2) if n > 0 else 0.0
 
+    invariant_violations = []
+
+    try:
+        # Extract RPF features (same as model uses)
+        if _loaded and _meta is not None:
+            rpf = _meta.extractor.extract(X, y)
+        else:
+            # fallback extractor
+            extractor = RPFExtractor()
+            rpf = extractor.extract(X, y)
+
+        _invariant_analyzer.fit_clean_bounds(X, y)
+        # Compute invariant scores per row
+        row_violations_dict = _invariant_analyzer.compute_row_violations(X, y)
+
+        invariant_violations = []
+        for i in range(len(X)):
+            row = []
+
+            if row_violations_dict["I1"][i]:
+                row.append("I1")
+            if row_violations_dict["I2"][i]:
+                row.append("I2")
+            if row_violations_dict["I3"][i]:
+                row.append("I3")
+            if row_violations_dict["I4"][i]:
+                row.append("I4")
+            if row_violations_dict["I5"][i]:
+                row.append("I5")
+
+            invariant_violations.append(row)
+
+    except Exception as e:
+        print(f"[backend] Invariant analysis failed: {e}")
+        invariant_violations = [[] for _ in range(len(X))]
+
     return {
         "scores":           (display_scores * 10).tolist(),
         "flags":            flags,
+        "invariant_violations": invariant_violations,
         "n_rows":           n,
         "n_flagged":        n_flagged,
         "pct_flagged":      pct_flagged,

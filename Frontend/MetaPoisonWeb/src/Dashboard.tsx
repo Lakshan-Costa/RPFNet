@@ -7,6 +7,7 @@ type Row = {
   score: number;
   y_true?: number;
   flagged?: number;
+  reasons?: string[];
 };
 
 type Metrics = {
@@ -170,6 +171,34 @@ export default function App() {
   const flagged = useMemo(() => rows.filter((r) => r.score >= interactiveTau), [rows, interactiveTau]);
   const metrics = useMemo(() => computeMetrics(rows, interactiveTau), [rows, interactiveTau]);
 
+  const THEOREM_EXPLANATION = `
+    Only effective poisoning attacks (those that degrade model performance)
+    will violate at least one invariant.
+    `;
+
+  const INVARIANT_INFO: Record<string, { name: string; desc: string }> = {
+    I1: {
+      name: "Neighbourhood Consistency",
+      desc: "Checks if a sample agrees with labels of nearby points. Poisoned samples often break local label agreement."
+    },
+    I2: {
+      name: "Geometric Coherence",
+      desc: "Ensures a point is closer to its own class than others. Poison shifts points across class boundaries."
+    },
+    I3: {
+      name: "Influence Boundedness",
+      desc: "Measures how much a sample affects the model. Poisoned points often have unusually high influence."
+    },
+    I4: {
+      name: "Structural Stability",
+      desc: "Detects graph inconsistencies between centrality and label agreement."
+    },
+    I5: {
+      name: "Scale Consistency",
+      desc: "Checks if feature magnitudes match the class distribution. Distribution shift attacks break this."
+    }
+  };
+
   useEffect(() => {
     (async () => {
       try {
@@ -180,10 +209,6 @@ export default function App() {
         setUsedTau(h.global_threshold || 3.5);
         setInteractiveTau(h.global_threshold || 3.5);
 
-        // thresholds endpoint currently unused in UI
-        // const resThresholds = await fetch(`${API_BASE}/thresholds`);
-        // const t = await resThresholds.json();
-        // setThresholds(t);
       } catch (e) {
         console.error("Failed to fetch health/thresholds:", e);
       }
@@ -195,16 +220,85 @@ export default function App() {
       id: String(i),
       score: s,
       flagged: res.flags[i],
+      reasons: res.invariant_violations?.[i] || [],
     }));
     setRows(newRows);
     setDatasetId(res.dataset_id || null);
-    // inferred dataset value unused
-    // setInferredDataset(res.uci_id ? `uci_${res.uci_id}` : res.mode || "");
     setThresholdSource(res.threshold_source || "unknown");
     setUsedTau(res.tau);
     setInteractiveTau(res.tau);
     setTauLocal(res.tau_local ?? null);
     setTopK(prev => Math.min(prev, newRows.length));
+  }
+
+  function formatReasons(reasons?: string[], isFlagged?: boolean) {
+    if (!reasons || reasons.length === 0) {
+      if (isFlagged) {
+        return (
+          <span>
+            No invariant violation
+            <InfoTooltip text={THEOREM_EXPLANATION} />
+          </span>
+        );
+      }
+      return "";
+    }
+
+    return (
+      <>
+        {reasons.map((r, idx) => (
+          <span key={idx} style={{ marginRight: 8 }}>
+            <strong>{r}</strong>: {INVARIANT_INFO[r]?.name}
+            <InfoTooltip text={INVARIANT_INFO[r]?.desc || ""} />
+          </span>
+        ))}
+      </>
+    );
+  }
+
+  function InfoTooltip({ text }: { text: string }) {
+    const [show, setShow] = useState(false);
+
+    return (
+      <span style={{ position: "relative", marginLeft: 6 }}>
+        <span
+          onMouseEnter={() => setShow(true)}
+          onMouseLeave={() => setShow(false)}
+          style={{
+            cursor: "pointer",
+            fontSize: 12,
+            borderRadius: "50%",
+            border: "1px solid rgba(255,255,255,0.4)",
+            padding: "0 5px",
+            display: "inline-block",
+            lineHeight: "16px",
+          }}
+          aria-label="More information"
+        >
+          ℹ
+        </span>
+
+        {show && (
+          <div
+            style={{
+              position: "absolute",
+              top: "120%",
+              left: 0,
+              background: "#111",
+              color: "#fff",
+              padding: "10px 12px",
+              borderRadius: 6,
+              width: 280,
+              fontSize: 12,
+              zIndex: 999,
+              border: "1px solid rgba(255,255,255,0.2)",
+            }}
+          >
+            {text}
+          </div>
+        )}
+      </span>
+    );
   }
 
 async function exportCleanDataset() {
@@ -464,33 +558,6 @@ async function exportCleanDataset() {
                       </span>
                     </label>
                     )}
-                    {/* <button
-                      onClick={async () => {
-                        try {
-                          setErr("");
-                          setLoading(true);
-                          setStatus("Fetching UCI → analyzing...");
-                          announceToScreenReader(`Loading UCI dataset ${uciId}`);
-                          const res = await analyzeUCI(Number(uciId), getTauForRequest());
-                          loadFromBackend(res);
-                          const statusMsg = `Analyzed ${res.n_rows} rows. τ=${formatNum(res.tau, 4)} (${res.threshold_source})`;
-                          setStatus(statusMsg);
-                          announceToScreenReader(`Analysis complete: ${statusMsg}`);
-                        } catch (ex: any) {
-                          const errorMsg = ex?.message ?? "Failed";
-                          setErr(errorMsg);
-                          setStatus("Failed.");
-                          announceToScreenReader(`Error loading UCI dataset: ${errorMsg}`, "assertive");
-                        } finally {
-                          setLoading(false);
-                        }
-                      }}
-                      disabled={loading}
-                      aria-label={`Analyze UCI dataset ${uciId} (currently ${loading ? "loading" : "ready"})`}
-                      style={{padding: "8px 16px", cursor: loading ? "not-allowed" : "pointer", opacity: loading ? 0.6 : 1, minHeight: "44px"}}
-                    >
-                      {loading ? "Analyzing..." : "Analyze UCI ID"}
-                    </button> */}
                   </div>
 
                   <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 10, alignItems: "end" }}>
@@ -520,33 +587,6 @@ async function exportCleanDataset() {
                       </span>
                     </label>
                     )}
-                    {/* <button
-                      disabled={!csvUrl.trim() || loading}
-                      onClick={async () => {
-                        try {
-                          setErr("");
-                          setLoading(true);
-                          setStatus("Fetching URL -> analyzing...");
-                          announceToScreenReader("Loading CSV from URL");
-                          const res = await analyzeURL(csvUrl.trim(), getTauForRequest(), datasetHint);
-                          loadFromBackend(res);
-                          const statusMsg = `Analyzed ${res.n_rows} rows. τ=${formatNum(res.tau, 4)} (${res.threshold_source})`;
-                          setStatus(statusMsg);
-                          announceToScreenReader(`Analysis complete: ${statusMsg}`);
-                        } catch (ex: any) {
-                          const errorMsg = ex?.message ?? "Failed";
-                          setErr(errorMsg);
-                          setStatus("Failed.");
-                          announceToScreenReader(`Error loading from URL: ${errorMsg}`, "assertive");
-                        } finally {
-                          setLoading(false);
-                        }
-                      }}
-                      aria-label={`Analyze CSV from URL${!csvUrl.trim() ? " (URL required)" : ""}`}
-                      style={{padding: "8px 16px", cursor: (!csvUrl.trim() || loading) ? "not-allowed" : "pointer", opacity: (!csvUrl.trim() || loading) ? 0.6 : 1, minHeight: "44px"}}
-                    >
-                      {loading ? "Analyzing..." : "Analyze URL"}
-                    </button> */}
                   </div>
                   <button
                     onClick={handleAnalyze}
@@ -832,6 +872,7 @@ async function exportCleanDataset() {
                     <th scope="col" style={{ padding: "8px 6px", fontWeight: 700 }}>Row ID</th>
                     <th scope="col" style={{ padding: "8px 6px", fontWeight: 700 }}>Anomaly Score</th>
                     <th scope="col" style={{ padding: "8px 6px", fontWeight: 700 }}>Status</th>
+                    <th scope="col" style={{ padding: "8px 6px", fontWeight: 700 }}>Reason</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -855,6 +896,15 @@ async function exportCleanDataset() {
                           >
                             {r.score >= interactiveTau ? "🚩 FLAGGED" : "✓ Clean"}
                           </span>
+                        </td>
+                        <td style={{ padding: "8px 6px" }}>
+                          {r.score >= interactiveTau ? (
+                            <span>
+                              {formatReasons(r.reasons, r.score >= interactiveTau)}
+                            </span>
+                          ) : (
+                            ""
+                          )}
                         </td>
                       </tr>
                     ))}
