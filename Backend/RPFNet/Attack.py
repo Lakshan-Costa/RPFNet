@@ -24,12 +24,6 @@ def _flip_label(yi, classes, rng):
 
 
 def apply_attack(name, X, y, fraction, seed=42, y_cont=None):
-    """
-    y_cont: optional continuous target for regression attacks.
-    For regression attacks, y is the binarized label, y_cont is the
-    original continuous target. Attacks modify X and y_cont, then
-    re-binarize to get new y.
-    """
     rng     = np.random.default_rng(seed)
     n       = max(1, int(len(X) * fraction))
     Xp, yp  = X.copy(), y.copy()
@@ -38,11 +32,10 @@ def apply_attack(name, X, y, fraction, seed=42, y_cont=None):
     classes = np.unique(y)
     is_bin  = len(classes) == 2
 
-    #  Regression-specific attacks
     if name == "target_shift":
-        # Shift continuous targets by ±3σ (then re-binarize)
+        # Shift continuous targets
         if y_cont is None:
-            # Fallback: treat as feat_perturb if no continuous target
+            # treat as feat_perturb if no continuous target
             name = "feat_perturb"
         else:
             y_std = y_cont.std() + 1e-8
@@ -53,14 +46,13 @@ def apply_attack(name, X, y, fraction, seed=42, y_cont=None):
             return Xp, yp, pidx
 
     if name == "leverage_attack":
-        # Move points to high-leverage positions AND shift their targets
         if y_cont is None:
             name = "feat_perturb"
         else:
             stds = X.std(axis=0) + 1e-8
             y_std = y_cont.std() + 1e-8
             for i in pidx:
-                # Push features to extreme positions (high leverage)
+                # Push features to extreme positions
                 Xp[i] += 3.0 * stds * rng.choice([-1., 1.], X.shape[1])
                 # Flip target direction
                 y_cont_p[i] = -y_cont_p[i] + rng.normal(0, 0.5 * y_std)

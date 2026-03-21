@@ -113,13 +113,6 @@ class RateEstimatorHead(nn.Module):
 def estimate_contamination_rate(scores: np.ndarray,
                                  lo: float = 0.01,
                                  hi: float = 0.40) -> float:
-    """
-    IMPROVED ensemble — 4 estimators + bimodality-aware weighting.
-
-    When bimodality is weak (scores don't clearly separate), we
-    down-weight estimators that tend to overestimate, fixing the
-    massive overestimation at 5% for subtle attacks.
-    """
     n        = len(scores)
     sorted_s = np.sort(scores)
     estimates = []

@@ -1,41 +1,12 @@
 #app.py
 """
-MetaPoison v2/v3 — Flask Backend  (FIXED v3)
-=============================================
-WHAT CHANGED (search for "# ◆ FIX" to see every change):
-
-  ◆ FIX 1  Fallback scoring: replaced rankdata()/n (uniform → always 40%)
-           with min-max on raw IsolationForest anomaly scores.
-
-  ◆ FIX 2  _compute_tau_local: replaced "mean+2σ of lower 60%" with
-           bimodality-aware Otsu threshold + conservative unimodal fallback.
-
-  ◆ FIX 3  Rate estimation: UNIVERSALLY conservative.
-           Hard cap at 5% for ALL modes. Neither IF nor the trained model
-           can reliably distinguish class structure from poisoning on
-           unknown data. If Otsu cluster >8% → treated as class structure.
-           User can always lower threshold with slider if they know data
-           is attacked.
-
-  ◆ FIX 4  _is_bimodal(): strict 2-of-4 signal requirement (AND not OR).
-           Gap test, kurtosis, tail mass, histogram valley — need 2+.
-
-  ◆ FIX 5  More IsolationForest trees (200 vs 100) for stable scores.
-
-  ◆ FIX 6  Backward-compatible model loading: v2 models (dim=47) load
-           with v3 detection.py (dim=55) via monkey-patched scoring.
-
-  ◆ FIX 7  Scoring mode passed through pipeline so rate estimator knows
-           whether to trust bimodality signal.
-
-Endpoints (unchanged)
-─────────
+Endpoints
 GET  /health
 GET  /thresholds
-POST /analyze_csv      multipart: file, tau?, dataset_hint?
-POST /analyze_uci      json:      { uci_id, tau? }
-POST /analyze_url      json:      { url, tau?, dataset_hint? }
-POST /export_clean     json:      { dataset_id, clean_ids[] }
+POST /analyze_csv
+POST /analyze_uci
+POST /analyze_url
+POST /export_clean
 POST /analyze_stream
 """
 
@@ -96,14 +67,14 @@ except Exception as _e:
     RPFNetPoisonNet = None
     RPF_K_SMALL, RPF_K_LARGE, RPF_CV_FOLDS = 5, 15, 5
 
-# ── App ───────────────────────────────────────────────────────────────────────
+# App 
 app = Flask(__name__)
 CORS(app, origins="*")
 
 UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# ── Global model state ────────────────────────────────────────────────────────
+# Global model state
 _lock = threading.Lock()
 _meta:   "RPFNetPoisonDetector"   | None = None
 _hybrid: "HybridEnsembleDetector" | None = None
@@ -121,18 +92,9 @@ def _global_threshold() -> float:
         return float(np.mean(list(DATASET_THRESHOLDS.values())))
     return GLOBAL_THRESHOLD_DEFAULT
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  Model loading  — ◆ FIX 6: backward-compatible with v2 (dim=47) models
-# ─────────────────────────────────────────────────────────────────────────────
-
 _LOADED_RPF_DIM = None   # track actual dim of loaded model
 
 def _load_model_compat(meta, path):
-    """
-    Try normal load first. If dim mismatch (v2 model on v3 code),
-    load with the old dim and monkey-patch the net + extractor.
-    """
     global _LOADED_RPF_DIM
 
     try:
@@ -143,7 +105,7 @@ def _load_model_compat(meta, path):
         if "RPF dim" not in str(e):
             raise
 
-    # ── Backward-compat: load old-dim model ──────────────────────────
+    # Backward-compat: load old-dim model
     print(f"[backend] Dim mismatch detected — loading in backward-compat mode")
     try:
         ckpt = torch.load(path, map_location=meta.device, weights_only=False)
@@ -183,7 +145,7 @@ def _load_model_compat(meta, path):
     meta._score_rpf = _patched_score_rpf
 
     v = ckpt.get("version", 2)
-    print(f"[backend]   ✓ Loaded v{v} model (dim={saved_dim}) in compat mode — "
+    print(f"[backend] Loaded v{v} model (dim={saved_dim}) in compat mode - "
           f"Block E features will be ignored during scoring")
     return True
 
@@ -199,7 +161,6 @@ def _load_model() -> None:
             batch_size=RPFNet_BATCH_SIZE, lr=RPFNet_LR,
         )
 
-        # ◆ FIX 6b: Try multiple model paths (v3 then v2)
         model_path = None
         candidates = [
             RPFNet_MODEL_PATH,
@@ -233,11 +194,6 @@ def _load_model() -> None:
 
 
 threading.Thread(target=_load_model, daemon=True).start()
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  CSV / dataframe helpers  (unchanged)
-# ─────────────────────────────────────────────────────────────────────────────
 
 def _infer_target(df: pd.DataFrame) -> str:
     candidates = [
@@ -283,30 +239,7 @@ def _prepare(df: pd.DataFrame):
 
     return X_scaled, y, sc, Xdf
 
-
-# ═════════════════════════════════════════════════════════════════════════════
-# ◆ FIX 4: Bimodality detector — TIGHTENED (v2)
-#   Problem: single-heuristic OR was too loose. IsolationForest on
-#   structured data (e.g. Mushroom with edible/poison classes) produces
-#   right-skewed scores that trigger tail mass test → 25% false flags.
-#   Fix: require 2+ heuristics to agree (AND logic), tighter thresholds.
-# ═════════════════════════════════════════════════════════════════════════════
-
 def _is_bimodal(scores: np.ndarray) -> bool:
-    """
-    Strict bimodality check — must see MULTIPLE signals, not just one.
-
-    Returns True only when there's strong evidence of a discrete poison
-    cluster separated from the bulk of the data. Single-signal triggers
-    (like a heavy right tail) are NOT enough — that's just normal
-    IsolationForest behavior on structured data.
-
-    Requires at least 2 of 4 tests to pass:
-      1. Large gap (>15% of range) in the upper half of scores
-      2. Platykurtic (kurtosis < -1.0)
-      3. Heavy isolated tail (>20% mass in top 3% of range)
-      4. Histogram valley — clear dip between two peaks
-    """
     if len(scores) < 30:
         return False
 
@@ -315,26 +248,26 @@ def _is_bimodal(scores: np.ndarray) -> bool:
     score_range = float(s[-1] - s[0]) + 1e-10
     signals = 0
 
-    # 1. Gap test — large gap in upper half only (lower half gaps are normal)
+    # Gap test — large gap in upper half only
     upper_half = s[n // 2:]
     diffs = np.diff(upper_half)
     if len(diffs) > 0 and diffs.max() / score_range > 0.15:  # was 0.10
         signals += 1
 
-    # 2. Kurtosis test — must be clearly platykurtic
+    # Kurtosis test
     mu  = s.mean()
     std = s.std() + 1e-10
     kurt = float(np.mean(((s - mu) / std) ** 4)) - 3.0
     if kurt < -1.0:  # was -0.5
         signals += 1
 
-    # 3. Tail mass test — very concentrated tail in narrow band
+    # Tail mass test
     top_3pct = s[0] + 0.97 * score_range  # was 0.95
     tail_mass = float((s >= top_3pct).mean())
     if tail_mass > 0.20:  # was 0.15 at 5%
         signals += 1
 
-    # 4. Histogram valley test — is there a clear dip between two peaks?
+    # Histogram valley test
     try:
         n_bins = min(50, max(10, n // 100))
         counts, edges = np.histogram(s, bins=n_bins)
@@ -352,22 +285,7 @@ def _is_bimodal(scores: np.ndarray) -> bool:
     # Require 2+ signals for bimodal classification
     return signals >= 2
 
-
-# ═════════════════════════════════════════════════════════════════════════════
-# ◆ FIX 2: Bimodality-aware local threshold (replaces mean+2σ)
-# ═════════════════════════════════════════════════════════════════════════════
-
 def _compute_tau_local(scores: np.ndarray) -> float:
-    """
-    Local threshold — now bimodality-aware.
-
-    OLD (buggy):
-        mean + 2*std of lower 60%  →  ~0.62 on ANY rank-normalised data
-
-    NEW:
-        If bimodal: Otsu threshold (optimal binary split)
-        If unimodal: median + 3.5 * MAD  (very conservative, flags ~1-3%)
-    """
     if len(scores) < 10:
         return float(np.percentile(scores, 95))
 
@@ -398,63 +316,30 @@ def _compute_tau_local(scores: np.ndarray) -> float:
         mad_s    = float(np.median(np.abs(scores - median_s))) * 1.4826 + 1e-10
         return median_s + 4.0 * mad_s  # was 3.5
 
-
-# ═════════════════════════════════════════════════════════════════════════════
-# ◆ FIX 3: Conservative contamination rate estimator — TIGHTENED (v4)
-#
-#   ROOT CAUSE of false positives on structured datasets (UCI 73 Mushroom):
-#   NEITHER IsolationForest NOR the trained MetaPoison model can reliably
-#   distinguish "natural class structure" from "injected poison" on an
-#   unseen dataset. Mushroom has edible/poisonous classes → both IF and
-#   MetaPoison rank-fusion produce bimodal scores → Otsu splits at the
-#   class boundary → 15-25% flagged.
-#
-#   DESIGN PRINCIPLE: the auto-estimator must be CONSERVATIVE on every
-#   dataset. Users who KNOW their data is poisoned can lower the threshold
-#   with the slider. But the default should never cry wolf on clean data.
-#
-#   Rule: auto-estimated rate is HARD CAPPED at 5%.
-#   - Unimodal scores → 0.3-3% (outliers only)
-#   - Bimodal with small cluster → up to 5%
-#   - Bimodal with large cluster (>8%) → class structure, not poison → 3%
-# ═════════════════════════════════════════════════════════════════════════════
-
-def _estimate_contamination_rate_safe(scores: np.ndarray,
-                                      scoring_mode: str = "isolation_forest"
-                                      ) -> float:
-    """
-    Principled contamination estimator.
-    No arbitrary hard cap.
-    
-    Strategy:
-    - If unimodal → MAD-based conservative estimate
-    - If weak bimodality → shrink Otsu toward MAD
-    - If strong bimodality → trust Otsu
-    - Allow up to 40% when justified
-    """
+def _estimate_contamination_rate_safe(scores: np.ndarray, scoring_mode: str = "isolation_forest") -> float:
 
     n = len(scores)
     if n < 30:
         return 0.01
 
-    # ── Compute conservative baseline (MAD outliers) ──────────────────
+    # Compute conservative baseline
     median_s = float(np.median(scores))
     mad_s    = float(np.median(np.abs(scores - median_s))) * 1.4826 + 1e-10
     mad_rate = float((scores > median_s + 4.0 * mad_s).mean())
     mad_rate = np.clip(mad_rate, 0.003, 0.05)
 
-    # ── Check bimodality ───────────────────────────────────────────────
+    # Check bimodality
     bimodal = _is_bimodal(scores)
 
     if not bimodal:
         # Clean unimodal distribution
         return float(mad_rate)
 
-    # ── Otsu estimate ──────────────────────────────────────────────────
+    # Otsu estimate
     tau_otsu  = _compute_tau_local(scores)
     otsu_rate = float((scores > tau_otsu).mean())
 
-    # ── Measure separation strength ────────────────────────────────────
+    # Measure separation strength
     # Compare cluster means to judge if split is meaningful
     below = scores[scores <= tau_otsu]
     above = scores[scores > tau_otsu]
@@ -464,7 +349,7 @@ def _estimate_contamination_rate_safe(scores: np.ndarray,
 
     separation = abs(below.mean() - above.mean()) / (scores.std() + 1e-8)
 
-    # ── Decision logic ─────────────────────────────────────────────────
+    # Decision logic
     if separation < 0.5:
         # Weak separation → likely natural structure
         return float(mad_rate)
@@ -477,25 +362,12 @@ def _estimate_contamination_rate_safe(scores: np.ndarray,
     # Strong separation → trust Otsu
     return float(np.clip(otsu_rate, 0.01, 0.40))
 
-
-# ═════════════════════════════════════════════════════════════════════════════
-# ◆ FIX 1 + 5: Rewritten scoring pipeline
-# ═════════════════════════════════════════════════════════════════════════════
-
 def _score_dataframe(df: pd.DataFrame, tau_override: float | None = None,
                       dataset_hint: str = "") -> dict:
-    """
-    Core scoring pipeline — FIXED.
-
-    Changes:
-      ◆ FIX 1: Fallback uses min-max normalised raw scores, NOT rank-normalised.
-      ◆ FIX 3: Auto threshold uses bimodality-aware rate estimation.
-      ◆ FIX 5: 200 trees in IsolationForest for more stable anomaly scores.
-    """
     X, y, sc, Xdf = _prepare(df)
     n = len(X)
 
-    # ── Step 1: Get RAW anomaly scores ────────────────────────────────────────
+    # Get RAW anomaly scores
     raw_scores = None
     mode       = "fallback"
 
@@ -508,27 +380,21 @@ def _score_dataframe(df: pd.DataFrame, tau_override: float | None = None,
             print(f"[backend] Hybrid scoring failed ({exc}), falling back")
 
     if raw_scores is None:
-        # ◆ FIX 5: 200 trees (was 100)
         iso = IsolationForest(n_estimators=200, contamination="auto",
                                random_state=42, n_jobs=-1)
         raw_scores = -iso.fit(X).score_samples(X)
         raw_scores = np.asarray(raw_scores, dtype=np.float64)
         mode = "isolation_forest"
 
-    # ◆ FIX 1: Min-max normalise to [0, 1] for display
-    #   OLD: rankdata(raw)/n → UNIFORM → always ~40% flagged
-    #   NEW: (raw - min) / (max - min) → preserves score SHAPE
     s_min   = float(raw_scores.min())
     s_max   = float(raw_scores.max())
     s_range = s_max - s_min + 1e-10
     display_scores = ((raw_scores - s_min) / s_range).astype(np.float64)
 
-    # ── Step 2: Threshold selection ───────────────────────────────────────────
-    # ◆ FIX 2: Bimodality-aware local threshold (on RAW scores)
     tau_local_raw = _compute_tau_local(raw_scores)
 
     if tau_override is not None:
-        # User set the slider → interpret as a value in display [0, 1] space
+        # User set the slider interpret as a value in display [0, 1] space
         tau_display  = float(tau_override)
         tau_raw      = s_min + tau_display * s_range
         threshold_source = "user_override"
@@ -537,9 +403,6 @@ def _score_dataframe(df: pd.DataFrame, tau_override: float | None = None,
         tau_display = float((tau_raw - s_min) / s_range)
         threshold_source = f"per_dataset:{dataset_hint}"
     else:
-        # ◆ FIX 3: Conservative auto-estimation with bimodality gate
-        # ◆ FIX 7: Pass scoring mode so rate estimator knows whether
-        #          to trust bimodality (only trust with trained model)
         est_rate    = _estimate_contamination_rate_safe(raw_scores,
                                                         scoring_mode=mode)
         tau_raw     = float(np.percentile(raw_scores, (1.0 - est_rate) * 100))
@@ -553,7 +416,7 @@ def _score_dataframe(df: pd.DataFrame, tau_override: float | None = None,
     ds_key = dataset_hint or f"ds_{uuid.uuid4().hex[:8]}"
     DATASET_THRESHOLDS[ds_key] = tau_raw
 
-    # ── Step 3: Flag rows ─────────────────────────────────────────────────────
+    # Flag rows
     flags     = (raw_scores >= tau_raw).astype(int).tolist()
     n_flagged = sum(flags)
     pct_flagged = round(n_flagged / n * 100, 2) if n > 0 else 0.0
@@ -617,11 +480,7 @@ def _score_dataframe(df: pd.DataFrame, tau_override: float | None = None,
         },
     }
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  Routes  (unchanged — they all call _score_dataframe which is now fixed)
-# ─────────────────────────────────────────────────────────────────────────────
-
+#  Routes
 @app.route("/health")
 def health():
     return jsonify({
@@ -808,7 +667,7 @@ def analyze_stream():
     scaler = session["scaler"]
     X_scaled = scaler.fit_transform(X)
 
-    # ── Train model only once during warmup ──
+    # Train model only once during warmup
     if not session["initialized"]:
         iso = IsolationForest(n_estimators=200, random_state=42)
         iso.fit(X_scaled)
@@ -816,7 +675,7 @@ def analyze_stream():
         session["model"] = iso
         session["initialized"] = True
 
-    # ── Use trained model for scoring ──
+    # Use trained model for scoring
     iso = session["model"]
 
     scores = -iso.score_samples(X_scaled)
@@ -861,8 +720,6 @@ def export_clean():
         download_name="clean_dataset.csv",
     )
 
-
-# ─────────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     print(f"[backend] Starting on http://0.0.0.0:{port}")

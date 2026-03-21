@@ -1,54 +1,27 @@
 #RPFextractor.py
-import os, time, pickle, warnings
+import warnings
 warnings.filterwarnings("ignore")
 
 import numpy as np
-import pandas as pd
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from datasets import load_dataset
 from sklearn.decomposition import PCA
-from sklearn.mixture import GaussianMixture
 from scipy.stats import rankdata
-from scipy.stats import ttest_rel, wilcoxon
 from sklearn.ensemble import (RandomForestClassifier, IsolationForest,
                                GradientBoostingClassifier)
 from sklearn.linear_model import LogisticRegression, Ridge
-from sklearn.model_selection import train_test_split, StratifiedKFold, KFold
-from sklearn.neighbors import NearestNeighbors, LocalOutlierFactor
-from sklearn.metrics import f1_score, precision_score, recall_score, roc_auc_score
-from sklearn.preprocessing import StandardScaler
-from sklearn.svm import OneClassSVM
-from sklearn.datasets import (load_breast_cancer, load_wine, load_digits,
-                               load_iris, load_diabetes, fetch_covtype,
-                               fetch_california_housing, fetch_openml,
-                               make_classification, make_moons, make_circles,
-                               make_friedman1, make_regression)
+from sklearn.model_selection import StratifiedKFold
+from sklearn.neighbors import NearestNeighbors
 
 class RPFExtractor:
-    """
-    Relational Poison Fingerprint v4 — 61-dimensional.
-
-    Block A  [0:8]   kNN Label Consistency
-    Block B  [8:17]  Class-Cond. Geometry
-    Block C  [17:21] Scale Anomaly
-    Block D  [21:34] Cross-Val Influence
-    Block E  [34:47] Local Anomaly Extended
-    Block F  [47:55] Regression/Influence Features
-    Block G  [55:61] Structural Echo (Poison Propagation) [NEW]
-    """
-
     DIM = 61
 
     BLOCK_NAMES = {
-        "A"  : ("kNN Label Consistency",      slice(0,  8)),
-        "B"  : ("Class-Cond. Geometry",       slice(8,  17)),
-        "C"  : ("Scale Anomaly",              slice(17, 21)),
-        "D"  : ("Cross-Val Influence",        slice(21, 34)),
-        "E"  : ("Local Anomaly Extended",     slice(34, 47)),
-        "F"  : ("Regression/Influence",       slice(47, 55)),
-        "G"  : ("Structural Echo [NEW]",      slice(55, 61)),
+        "A"  : ("kNN Label Consistency",    slice(0,  8)),
+        "B"  : ("Class-Cond. Geometry",     slice(8,  17)),
+        "C"  : ("Scale Anomaly",            slice(17, 21)),
+        "D"  : ("Cross-Val Influence",      slice(21, 34)),
+        "E"  : ("Local Anomaly Extended",   slice(34, 47)),
+        "F"  : ("Regression/Influence",     slice(47, 55)),
+        "G"  : ("Structural Echo",          slice(55, 61)),
     }
 
     def __init__(self, k_small: int = 5, k_large: int = 15,
@@ -59,10 +32,6 @@ class RPFExtractor:
 
     def extract(self, X: np.ndarray, y: np.ndarray,
                 y_cont: np.ndarray = None) -> np.ndarray:
-        """
-        y_cont: optional continuous targets for regression features.
-        If None, uses y (cast to float) for Block E regression features.
-        """
         n, d = X.shape
         rpf  = np.zeros((n, self.DIM), dtype=np.float32)
 
@@ -199,7 +168,7 @@ class RPFExtractor:
     # Block C
 
     def _block_c(self, X, y, rpf):
-        n       = len(X)
+        n = len(X)
         classes = np.unique(y)
         if len(classes) < 2:
             return
@@ -454,7 +423,6 @@ class RPFExtractor:
             rpf[:, 46] = 0.0
 
     #  Block F: Regression/Influence Features 
-
     def _block_f(self, X: np.ndarray, y: np.ndarray, rpf: np.ndarray,
                  y_cont: np.ndarray = None):
         n, d = X.shape
@@ -463,7 +431,7 @@ class RPFExtractor:
         y_reg = y_cont.astype(np.float64) if y_cont is not None \
                 else y.astype(np.float64)
 
-        # Fit ridge regression: y ~ X
+        # Fit ridge regression
         try:
             ridge = Ridge(alpha=1.0).fit(X.astype(np.float64), y_reg)
             y_hat = ridge.predict(X.astype(np.float64))
@@ -472,7 +440,7 @@ class RPFExtractor:
             rpf[:, 47:55] = 0.0
             return
 
-        # ── Leverage (hat matrix diagonal)
+        # Leverage (hat matrix diagonal)
         try:
             # H = X(X'X + αI)^{-1}X'  — diagonal only
             XtX_inv = np.linalg.inv(
@@ -485,22 +453,20 @@ class RPFExtractor:
 
         rpf[:, 47] = rankdata(H_diag).astype(np.float32) / n
 
-        # ── Studentized residual 
+        # Studentized residual 
         mse = (resid ** 2).mean() + 1e-8
         stud_resid = resid / np.sqrt(mse * (1 - np.clip(H_diag, 0, 0.999) + 1e-8))
         rpf[:, 48] = rankdata(np.abs(stud_resid)).astype(np.float32) / n
 
-        # ── Cook's distance
+        # Cook's distance
         p = min(d, n - 1)
         cooks_d = (stud_resid ** 2 / max(p, 1)) * (H_diag / (1 - H_diag + 1e-8))
         rpf[:, 49] = rankdata(cooks_d).astype(np.float32) / n
 
-        # ── DFFITS 
+        # DFFITS 
         dffits = stud_resid * np.sqrt(H_diag / (1 - H_diag + 1e-8))
         rpf[:, 50] = rankdata(np.abs(dffits)).astype(np.float32) / n
 
-        # ── Local residual consistency 
-        # Do neighbors have similar residual signs?
         try:
             k = max(2, min(10, n - 2))
             nbrs = NearestNeighbors(n_neighbors=k + 1, algorithm="ball_tree").fit(X)
@@ -512,7 +478,6 @@ class RPFExtractor:
         except Exception:
             rpf[:, 51] = 0.5
 
-        # ── Prediction rank within class 
         pred_rank = np.zeros(n, np.float32)
         classes = np.unique(y)
         for c in classes:
@@ -520,70 +485,22 @@ class RPFExtractor:
             if len(idx) < 2: continue
             pred_rank[idx] = rankdata(y_hat[idx]).astype(np.float32) / len(idx)
         rpf[:, 52] = pred_rank
-
-        # ── Residual × leverage interaction 
         rpf[:, 53] = rankdata(np.abs(resid) * H_diag).astype(np.float32) / n
 
-        # ── Leave-one-out influence estimate (approximate) 
-        # Sherman-Morrison approximation: Δŷ_i ≈ resid_i * h_ii / (1 - h_ii)
         loo_influence = np.abs(resid * H_diag / (1 - H_diag + 1e-8))
         rpf[:, 54] = rankdata(loo_influence).astype(np.float32) / n
 
-    # ══════════════════════════════════════════════════════════════════════
-    #  Block G: Structural Echo — Poison Propagation Depth
-    # ══════════════════════════════════════════════════════════════════════
-    #
-    #  Core insight: when a clean sample is removed from the KNN graph,
-    #  only its immediate neighbors need to rewire. When a poisoned sample
-    #  is removed, the structural disruption propagates further — into
-    #  2-hop and 3-hop neighborhoods — because the poisoned sample was
-    #  artificially warping local geometry to influence the decision boundary.
-    #
-    #  This block measures the "echo" of each sample's removal:
-    #    G0 [55]: Reverse KNN degree — how many samples depend on i
-    #    G1 [56]: Embedding depth — how deeply i is woven into neighbors
-    #    G2 [57]: 2-hop echo magnitude — cascade size beyond direct neighbors
-    #    G3 [58]: Echo asymmetry — centrality × label inconsistency
-    #    G4 [59]: Propagation ratio — does the echo amplify or decay?
-    #    G5 [60]: Displacement cost — structural cost of removing i
-    #
-    #  No ML models or existing frameworks used — pure graph topology.
-    # ══════════════════════════════════════════════════════════════════════
-
     def _block_g(self, X: np.ndarray, y: np.ndarray, rpf: np.ndarray,
                  k2: int, D_all: np.ndarray, I_all: np.ndarray):
-        """
-        Structural Echo: measures how far neighborhood disruption
-        propagates when each sample is hypothetically removed.
-        """
         n = len(X)
         k = min(k2, D_all.shape[1])
         I = I_all[:, :k]
         D = D_all[:, :k]
-
-        # ── Step 1: Reverse KNN (vectorised) ─────────────────────────
-        # reverse_knn(i) = set of samples j where i ∈ KNN(j)
-        # Computed via scatter-add over the neighbor index matrix.
         rev_counts = np.zeros(n, dtype=np.float32)
-        np.add.at(rev_counts, I.ravel(), 1.0)
 
-        # G0: Reverse KNN degree (normalised by dataset mean)
-        # Poisoned samples often have HIGH reverse degree because they
-        # are positioned to influence many neighbors' decision regions.
         rev_mean = rev_counts.mean() + 1e-8
         rpf[:, 55] = rev_counts / rev_mean
 
-        # ── Step 2: Embedding depth ──────────────────────────────────
-        # For each sample i, across all j that have i as a neighbor:
-        #   what is i's average *position rank* in j's KNN list?
-        # Position 0 = i is j's closest neighbor (deeply embedded)
-        # Position k-1 = i is j's farthest neighbor (peripheral)
-        #
-        # depth(i) = mean over j∈reverse_knn(i) of (1 - pos/k)
-        #
-        # Poisoned samples that are strategically placed to influence
-        # decision boundaries tend to be deeply embedded (close neighbor
-        # of many), while their own neighborhoods are inconsistent.
         pos_sum = np.zeros(n, dtype=np.float64)
         pos_cnt = np.zeros(n, dtype=np.float64)
         for p in range(k):
@@ -594,32 +511,18 @@ class RPFExtractor:
         avg_position = pos_sum / (pos_cnt + 1e-8)
         embedding_depth = (1.0 - avg_position / (k + 1e-8)).astype(np.float32)
 
-        # G1: Embedding depth
         rpf[:, 56] = embedding_depth
 
-        # ── Step 3: Build reverse adjacency for multi-hop ────────────
-        # Needed for 2-hop echo computation.
-        # rev_adj[i] = list of samples that have i in their KNN
         rev_adj = [[] for _ in range(n)]
         for j in range(n):
             for p in range(k):
                 rev_adj[I[j, p]].append(j)
 
-        # ── Step 4: 2-hop echo magnitude ─────────────────────────────
-        # When sample i is removed:
-        #   hop-1: all j ∈ reverse_knn(i) must rewire
-        #   hop-2: for each such j, THEIR reverse neighbors may also
-        #          be affected because j's neighborhood just changed
-        #
-        # echo_2hop(i) = |⋃_{j ∈ rev(i)} rev(j)| - |rev(i)| - 1
-        #
-        # Clean samples: small hop-1, tiny hop-2 (localised ripple)
-        # Poison samples: large hop-1 AND large hop-2 (wave propagates)
         hop1_sizes = np.array([len(rev_adj[i]) for i in range(n)],
                                dtype=np.float32)
         hop2_sizes = np.zeros(n, dtype=np.float32)
 
-        # For large datasets, subsample to keep runtime bounded
+        # For large datasets
         max_hop1_expand = 200  # cap inner loop breadth
 
         for i in range(n):
@@ -640,44 +543,16 @@ class RPFExtractor:
             scale = len(hop1) / len(expand) if len(expand) > 0 else 1.0
             hop2_sizes[i] = len(hop2_set) * scale
 
-        # G2: 2-hop echo magnitude (normalised)
+        # 2-hop echo magnitude
         hop2_mean = hop2_sizes.mean() + 1e-8
         rpf[:, 57] = hop2_sizes / hop2_mean
 
-        # ── Step 5: Echo asymmetry ───────────────────────────────────
-        # Key idea: poisoned samples are structurally central (high
-        # reverse KNN) but relationally inconsistent (low label match).
-        # Clean central samples have BOTH high degree AND high agreement.
-        #
-        # asymmetry(i) = centrality(i) × (1 - label_agreement(i))
-        #
-        # This is the core novelty signal: the *mismatch* between
-        # topological importance and semantic coherence.
         NL = y[I]
         label_agree = (NL == y[:, np.newaxis]).mean(1).astype(np.float32)
         centrality = rev_counts / rev_mean
         rpf[:, 58] = centrality * (1.0 - label_agree + 0.01)
-
-        # ── Step 6: Propagation ratio ────────────────────────────────
-        # Does the echo amplify or decay from hop-1 to hop-2?
-        #   ratio > 1: echo amplifies (disruption spreads) → poison
-        #   ratio < 1: echo decays (disruption is absorbed) → clean
-        #
-        # Clean samples sit in stable, self-consistent regions where
-        # their removal is locally absorbed. Poisoned samples sit at
-        # structural fault lines where removal triggers cascading
-        # reorganisation.
         rpf[:, 59] = hop2_sizes / (hop1_sizes + 1e-8)
 
-        # ── Step 7: Displacement cost ────────────────────────────────
-        # When i is removed from j's KNN, j must find a replacement.
-        # The cost depends on where i sat in j's ranked neighbor list.
-        # If i was j's 1st neighbor: expensive replacement (big gap).
-        # If i was j's kth neighbor: cheap replacement (boundary swap).
-        #
-        # cost(i) = mean over j∈rev(i) of D[j, k-1] - D[j, pos_of_i]
-        #
-        # This measures the actual geometric cost of restructuring.
         disp_sum = np.zeros(n, dtype=np.float64)
         disp_cnt = np.zeros(n, dtype=np.float64)
         boundary = D[:, -1]  # each sample's kth-neighbor distance
@@ -690,5 +565,5 @@ class RPFExtractor:
 
         displacement = (disp_sum / (disp_cnt + 1e-8)).astype(np.float32)
 
-        # G5: Displacement cost (rank-normalised)
+        # G5: Displacement cost
         rpf[:, 60] = rankdata(displacement).astype(np.float32) / n
