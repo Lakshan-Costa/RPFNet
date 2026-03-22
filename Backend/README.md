@@ -1,4 +1,4 @@
-**Status: Alpha** - APIs may change and detection thresholds are still being refined. Results should not be considered production-stable.
+**Status: Beta** - APIs may change and detection thresholds are still being refined. Results should not be considered production-stable.
 
 RPFNet is a Python library for detecting data poisoning attacks in tabular datasets. It supports batch analysis, streaming detection, and clean dataset export.
 

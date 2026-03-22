@@ -1,32 +1,3 @@
-"""
-RPFNet Public API — PyPI Package Interface
-===========================================
-Ported from the working Flask backend (app.py).
-
-Usage:
-    from rpfnet import api
-
-    # ── Batch analysis ──────────────────────────────────────────
-    report = api.analyze('csv', 'data.csv')
-    report = api.analyze('uci', 73)
-    report = api.analyze('url', 'https://example.com/data.csv')
-
-    # ── Get cleaned DataFrame ───────────────────────────────────
-    clean_df = api.clean('csv', 'data.csv')
-    clean_df = api.clean('uci', 73)
-
-    # ── Streaming — same interface ──────────────────────────────
-    report = api.analyze('stream', training_df)   # initialize baseline
-    result = api.analyze('stream', new_row)        # score one row
-    result = api.analyze('stream', {'f1': 1.2})   # score dict row
-    clean_df = api.clean('stream')                 # get clean buffer rows
-    status = api.analyze('stream')                 # check status
-
-    # Utilities
-    api.stream_reset()     # clear stream buffer
-    api.stream_retrain()   # force retrain on current buffer
-"""
-
 from __future__ import annotations
 
 import importlib
@@ -42,25 +13,15 @@ import pandas as pd
 from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Package-relative base directory  (works both in dev tree and installed wheel)
-# ─────────────────────────────────────────────────────────────────────────────
-
+# Package-relative base directory
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 def _resolve_bundled_model() -> str:
-    """
-    Locate RPFNet_universal.pt whether running from the source tree or as
-    an installed PyPI package.  Returns an absolute path (may not exist yet
-    if the package was installed without the weight file).
-    """
-    # 1. Co-located with api.py — works in both the dev tree and installed wheel
     local = os.path.join(BASE_DIR, "RPFNet_universal.pt")
     if os.path.exists(local):
         return local
 
-    # 2. importlib.resources (Python ≥ 3.9, handles zip-safe wheels)
     try:
         ref = _pkg_resources.files("RPFNet").joinpath("RPFNet_universal.pt")
         with _pkg_resources.as_file(ref) as p:
@@ -69,7 +30,6 @@ def _resolve_bundled_model() -> str:
     except Exception:
         pass
 
-    # 3. Legacy pkg_resources (Python 3.8 / editable installs)
     try:
         import pkg_resources as _pr
         path = _pr.resource_filename("RPFNet", "RPFNet_universal.pt")
@@ -78,14 +38,9 @@ def _resolve_bundled_model() -> str:
     except Exception:
         pass
 
-    # Fallback — return expected location so the missing-file error is clear
     return local
 
-
-# ─────────────────────────────────────────────────────────────────────────────
 # Global model state
-# ─────────────────────────────────────────────────────────────────────────────
-
 _meta   = None
 _hybrid = None
 _model_loaded         = False
@@ -108,23 +63,8 @@ _RPF_CV_FOLDS    = 3
 _BACKEND_AVAILABLE = False
 _LOADED_RPF_DIM    = None   # actual dim of the loaded checkpoint
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Backend import  (mirrors app.py's import block, supports relative + absolute)
-# ─────────────────────────────────────────────────────────────────────────────
-
+# Backend import
 def _try_import_backend() -> bool:
-    """
-    Import the RPFNet detection backend.
-
-    Tries relative imports first (installed package: `from rpfnet import api`)
-    then absolute imports (direct run / dev tree: `from RPFNet.api import …`).
-
-    CRITICAL: never lets detection.py's RPFNet_MODEL_PATH override
-    _META_MODEL_PATH unless it is an *absolute* path that actually exists —
-    detection.py exports a CWD-relative "./RPFNet_universal.pt" which breaks
-    when the package is imported from a different working directory.
-    """
     global _MetaPoisonDetector, _HybridEnsembleDetector
     global _RateEstimatorHead, _MetaPoisonNet, _RPFExtractor_cls
     global _META_MODEL_PATH, _META_EPOCHS, _META_BATCH_SIZE, _META_LR
@@ -143,7 +83,7 @@ def _try_import_backend() -> bool:
                 last_err = e
         raise ImportError(f"Cannot import {mod_name}: {last_err}") from last_err
 
-    # ── Core submodules ──────────────────────────────────────────────────────
+    # Core submodules
     try:
         rpf_mod  = _import("RPFExtractor")
         rate_mod = _import("RateEstimator")
@@ -153,7 +93,7 @@ def _try_import_backend() -> bool:
         print(f"[rpfnet] Core submodule import failed: {e}")
         return False
 
-    # ── detection.py ────────────────────────────────────────────────────────
+    # detection.py
     try:
         det = _import("detection")
     except Exception as e:
@@ -168,9 +108,6 @@ def _try_import_backend() -> bool:
     _HybridEnsembleDetector = det.HybridEnsembleDetector
     _MetaPoisonNet          = det.RPFNetPoisonDetector
 
-    # Only adopt detection.py's model path if it is absolute AND on disk.
-    # Its default value ("./RPFNet_universal.pt") is CWD-relative and will
-    # silently break when imported from a different directory.
     detected_path = getattr(det, "RPFNet_MODEL_PATH", None)
     if detected_path and os.path.isabs(detected_path) and os.path.exists(detected_path):
         _META_MODEL_PATH = detected_path
@@ -190,21 +127,13 @@ def _try_import_backend() -> bool:
 _try_import_backend()
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Lazy model loader  (ported from app.py's _load_model / _load_model_compat)
-# ─────────────────────────────────────────────────────────────────────────────
-
+# Lazy model loader
 def _load_model_compat(meta, path: str) -> bool:
-    """
-    Load checkpoint with backward-compatibility for dim mismatches
-    (e.g. a v2 model with dim=47 loaded by v3 code expecting dim=55+).
-    Mirrors app.py's _load_model_compat exactly.
-    """
     global _LOADED_RPF_DIM
 
     import torch
 
-    # ── Normal load ──────────────────────────────────────────────────────────
+    # Normal load
     try:
         meta.load(path)
         _LOADED_RPF_DIM = getattr(_RPFExtractor_cls, "DIM", None)
@@ -213,7 +142,7 @@ def _load_model_compat(meta, path: str) -> bool:
         if "RPF dim" not in str(e):
             raise
 
-    # ── Dim-mismatch: backward-compat load ──────────────────────────────────
+    # Dim-mismatch: backward-compat load
     print("[rpfnet] Dim mismatch — loading checkpoint in backward-compat mode")
     try:
         ckpt = torch.load(path, map_location=meta.device, weights_only=False)
@@ -250,7 +179,7 @@ def _load_model_compat(meta, path: str) -> bool:
     meta._score_rpf = _patched
 
     v = ckpt.get("version", 2)
-    print(f"[rpfnet]   ✓ Loaded v{v} checkpoint (dim={saved_dim}) in compat mode")
+    print(f"[rpfnet] Loaded v{v} checkpoint (dim={saved_dim}) in compat mode")
     return True
 
 
@@ -316,16 +245,11 @@ def _ensure_model():
     except Exception as e:
         print(f"[rpfnet] Model load failed: {e} — using IsolationForest fallback")
 
-
-# ─────────────────────────────────────────────────────────────────────────────
 # DataFrame preparation  (identical to app.py)
-# ─────────────────────────────────────────────────────────────────────────────
-
 _TARGET_CANDIDATES = [
     "loan_status", "Loan_Status", "deposit", "default", "Default",
     "label", "target", "y", "class", "outcome", "Target",
-    "is_fraud", "fraud", "Class",
-]
+    "is_fraud", "fraud", "Class",]
 
 
 def _infer_target(df: pd.DataFrame) -> str:
@@ -356,10 +280,14 @@ def _prepare(df: pd.DataFrame):
         Xdf = Xdf.drop(columns=drop)
 
     Xdf = Xdf.dropna(axis=1, how="all")
+    MAX_CARDINALITY = 20
     for c in Xdf.select_dtypes(include="number").columns:
         Xdf[c] = Xdf[c].fillna(Xdf[c].median())
     for c in Xdf.select_dtypes(exclude="number").columns:
         Xdf[c] = Xdf[c].fillna("missing")
+        if Xdf[c].nunique() > MAX_CARDINALITY:
+            freq = Xdf[c].value_counts(normalize=True)
+            Xdf[c] = Xdf[c].map(freq).astype(np.float32)
     Xdf = pd.get_dummies(Xdf)
 
     X = Xdf.values.astype(np.float32)
@@ -367,16 +295,8 @@ def _prepare(df: pd.DataFrame):
     X_scaled = sc.fit_transform(X).astype(np.float32)
     return X_scaled, y, sc, Xdf
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Bimodality & threshold helpers  (ported from app.py — the FIXED versions)
-# ─────────────────────────────────────────────────────────────────────────────
-
+# Bimodality & threshold helpers
 def _is_bimodal(scores: np.ndarray) -> bool:
-    """
-    Strict 2-of-4 bimodality check (ported from app.py ◆ FIX 4).
-    Requires at least 2 of: gap test, kurtosis, tail mass, histogram valley.
-    """
     if len(scores) < 30:
         return False
 
@@ -385,25 +305,25 @@ def _is_bimodal(scores: np.ndarray) -> bool:
     score_range = float(s[-1] - s[0]) + 1e-10
     signals = 0
 
-    # 1. Large gap in the upper half of scores
+    # Large gap in the upper half of scores
     upper_half = s[n // 2:]
     diffs = np.diff(upper_half)
     if len(diffs) > 0 and diffs.max() / score_range > 0.15:
         signals += 1
 
-    # 2. Clearly platykurtic distribution
+    # Clearly platykurtic distribution
     mu  = s.mean()
     std = s.std() + 1e-10
     kurt = float(np.mean(((s - mu) / std) ** 4)) - 3.0
     if kurt < -1.0:
         signals += 1
 
-    # 3. Concentrated tail mass in the top 3% of the score range
+    # Concentrated tail mass in the top 3% of the score range
     top_3pct = s[0] + 0.97 * score_range
     if float((s >= top_3pct).mean()) > 0.20:
         signals += 1
 
-    # 4. Histogram valley between two peaks
+    # Histogram valley between two peaks
     try:
         n_bins = min(50, max(10, n // 100))
         counts, _ = np.histogram(s, bins=n_bins)
@@ -421,11 +341,6 @@ def _is_bimodal(scores: np.ndarray) -> bool:
 
 
 def _compute_tau(scores: np.ndarray) -> float:
-    """
-    Bimodality-aware threshold (ported from app.py's _compute_tau_local ◆ FIX 2).
-    Bimodal  → Otsu optimal split.
-    Unimodal → median + 4 × MAD  (conservative, flags ~0.5–2 %).
-    """
     if len(scores) < 10:
         return float(np.percentile(scores, 95))
 
@@ -454,12 +369,6 @@ def _compute_tau(scores: np.ndarray) -> float:
 
 
 def _estimate_rate(scores: np.ndarray) -> float:
-    """
-    Principled contamination estimator (ported from app.py ◆ FIX 3).
-    Unimodal       → MAD-based conservative estimate (≤ 5 %).
-    Weak bimodal   → blend MAD + Otsu (≤ 20 %).
-    Strong bimodal → trust Otsu (≤ 40 %).
-    """
     n = len(scores)
     if n < 30:
         return 0.01
@@ -487,21 +396,8 @@ def _estimate_rate(scores: np.ndarray) -> float:
         return float(np.clip(0.5 * mad_rate + 0.5 * otsu_rate, 0.01, 0.20))
     return float(np.clip(otsu_rate, 0.01, 0.40))
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Core scoring pipeline  (ported from app.py's _score_dataframe ◆ FIX 1+5)
-# ─────────────────────────────────────────────────────────────────────────────
-
+# Core scoring pipeline
 def _score_dataframe(df: pd.DataFrame) -> dict:
-    """
-    Score every row for poisoning and return a full report dict.
-
-    Return keys
-    -----------
-    n_rows, n_flagged, n_clean, pct_flagged, estimated_rate,
-    mode, bimodal, scores, flags, flagged_indices, clean_indices,
-    dataframe (annotated with _poison_score & _poison_flag), score_stats.
-    """
     _ensure_model()
     X, y, sc, Xdf = _prepare(df)
     n = len(X)
@@ -509,7 +405,7 @@ def _score_dataframe(df: pd.DataFrame) -> dict:
     raw_scores: np.ndarray | None = None
     mode = "isolation_forest"
 
-    # ── Try trained RPFNet hybrid scorer first ────────────────────────────────
+    # Try trained RPFNet hybrid scorer first
     if _model_loaded and _hybrid is not None:
         try:
             combined, _, _ = _hybrid.score(X, y)
@@ -518,19 +414,19 @@ def _score_dataframe(df: pd.DataFrame) -> dict:
         except Exception as exc:
             print(f"[rpfnet] Hybrid scoring failed ({exc}), falling back")
 
-    # ── IsolationForest fallback (◆ FIX 5: 200 trees) ────────────────────────
+    # IsolationForest fallback
     if raw_scores is None:
         iso = IsolationForest(n_estimators=200, contamination="auto",
                               random_state=42, n_jobs=-1)
         raw_scores = -iso.fit(X).score_samples(X)
         raw_scores = np.asarray(raw_scores, dtype=np.float64)
 
-    # ── Min-max normalise for display (◆ FIX 1: NOT rank-normalised) ─────────
+    # Min-max normalise for display
     s_min   = float(raw_scores.min())
     s_range = float(raw_scores.max()) - s_min + 1e-10
     display = ((raw_scores - s_min) / s_range).astype(np.float64)
 
-    # ── Threshold & flags ─────────────────────────────────────────────────────
+    # Threshold & flags
     est_rate = _estimate_rate(raw_scores)
     tau_raw  = float(np.percentile(raw_scores, (1.0 - est_rate) * 100))
     flags    = (raw_scores >= tau_raw).astype(int)
@@ -566,11 +462,7 @@ def _score_dataframe(df: pd.DataFrame) -> dict:
         },
     }
 
-
-# ─────────────────────────────────────────────────────────────────────────────
 # Data loaders
-# ─────────────────────────────────────────────────────────────────────────────
-
 def _load_csv(path: str) -> pd.DataFrame:
     if not os.path.exists(path):
         raise FileNotFoundError(f"CSV file not found: {path}")
@@ -606,24 +498,8 @@ def _load_url(url: str) -> pd.DataFrame:
     except ImportError:
         return pd.read_csv(url)
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Stream state  (mirrors app.py's STREAM_SESSIONS, but as a module singleton)
-# ─────────────────────────────────────────────────────────────────────────────
-
+# Stream state 
 class _StreamState:
-    """
-    Single persistent stream session.
-
-    Lifecycle:
-        analyze('stream', DataFrame)  → initialise baseline, score all rows
-        analyze('stream', row)        → score one new sample
-        analyze('stream')             → return current status
-        clean('stream')               → return clean rows from buffer
-        stream_reset()                → wipe everything
-        stream_retrain()              → force retrain on current buffer
-    """
-
     def __init__(self):
         self.reset()
 
@@ -832,15 +708,11 @@ class AnalysisReport:
             f"mode={s['mode']}>"
         )
 
-# ═════════════════════════════════════════════════════════════════════════════
 # PUBLIC API
-# ═════════════════════════════════════════════════════════════════════════════
-
 def analyze(
     source: Literal["uci", "csv", "url", "stream"],
     dataset: Union[int, str, list, dict, np.ndarray, pd.DataFrame,
-                   pd.Series, None] = None,
-) -> dict:
+                   pd.Series, None] = None,) -> dict:
     """
     Analyze data for poisoning.
 
@@ -878,12 +750,12 @@ def analyze(
     >>> print(status['n_samples'])
     """
     warnings.warn(
-        "rpfnet is in ALPHA — APIs may change and results should be validated.",
+        "rpfnet is in BETA — APIs may change and results should be validated.",
         UserWarning,
         stacklevel=2,
     )
 
-    # ── Batch sources ─────────────────────────────────────────────────────────
+    # Batch sources
     if source == "csv":
         if not isinstance(dataset, str):
             raise TypeError("source='csv' requires dataset as a file path (str)")
@@ -908,7 +780,7 @@ def analyze(
             raise ValueError(f"Dataset too small ({len(df)} rows). Need >= 5.")
         return AnalysisReport(_score_dataframe(df))
 
-    # ── Stream ────────────────────────────────────────────────────────────────
+    # Stream
     if source == "stream":
         if dataset is None:
             return _stream_status()
@@ -930,8 +802,7 @@ def analyze(
 
 def clean(
     source: Literal["uci", "csv", "url", "stream"],
-    dataset: Union[int, str, pd.DataFrame, None] = None,
-) -> pd.DataFrame:
+    dataset: Union[int, str, pd.DataFrame, None] = None,) -> pd.DataFrame:
     """
     Return only the clean (non-poisoned) rows.
 
@@ -958,7 +829,7 @@ def clean(
     >>> api.analyze('stream', training_df)
     >>> clean_df = api.clean('stream')
     """
-    # ── Stream ────────────────────────────────────────────────────────────────
+    # Stream
     if source == "stream":
         if isinstance(dataset, pd.DataFrame):
             _stream_init_baseline(dataset)
@@ -982,7 +853,7 @@ def clean(
         ]
         return pd.DataFrame(clean_rows) if clean_rows else pd.DataFrame()
 
-    # ── Batch sources ─────────────────────────────────────────────────────────
+    # Batch sources
     if dataset is None:
         raise TypeError(f"dataset is required for source='{source}'")
 

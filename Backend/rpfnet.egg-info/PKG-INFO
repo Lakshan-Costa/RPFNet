@@ -1,6 +1,6 @@
 Metadata-Version: 2.1
 Name: rpfnet
-Version: 0.1.4
+Version: 0.1.12
 Summary: RPFNet: Attack-Agnostic Tabular Data Poisoning Detection via Meta-Learned Relational Fingerprints
 Home-page: https://github.com/lakshancosta/RPFNet
 Author: Lakshan Costa
@@ -8,7 +8,7 @@ Author-email: lakshancosta2@gmail.com
 License: MIT
 Keywords: poisoning detection machine-learning data-science
 Platform: UNKNOWN
-Classifier: Development Status :: 3 - Alpha
+Classifier: Development Status :: 4 - Beta
 Classifier: Intended Audience :: Developers
 Classifier: Operating System :: Microsoft :: Windows
 Classifier: License :: OSI Approved :: MIT License
@@ -16,7 +16,7 @@ Classifier: Programming Language :: Python :: 3
 Description-Content-Type: text/markdown
 License-File: LICENCE.txt
 
-**Status: Alpha** - APIs may change and detection thresholds are still being refined. Results should not be considered production-stable.
+**Status: Beta** - APIs may change and detection thresholds are still being refined. Results should not be considered production-stable.
 
 RPFNet is a Python library for detecting data poisoning attacks in tabular datasets. It supports batch analysis, streaming detection, and clean dataset export.
 

@@ -227,10 +227,14 @@ def _prepare(df: pd.DataFrame):
         Xdf = Xdf.drop(columns=drop)
 
     Xdf = Xdf.dropna(axis=1, how="all")
+    MAX_CARDINALITY = 20
     for c in Xdf.select_dtypes(include="number").columns:
         Xdf[c] = Xdf[c].fillna(Xdf[c].median())
     for c in Xdf.select_dtypes(exclude="number").columns:
         Xdf[c] = Xdf[c].fillna("missing")
+        if Xdf[c].nunique() > MAX_CARDINALITY:
+            freq = Xdf[c].value_counts(normalize=True)
+            Xdf[c] = Xdf[c].map(freq).astype(np.float32)
     Xdf = pd.get_dummies(Xdf)
 
     X = Xdf.values.astype(np.float32)

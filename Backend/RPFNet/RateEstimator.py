@@ -16,11 +16,6 @@ from sklearn.metrics import f1_score, precision_score, recall_score, roc_auc_sco
 from sklearn.svm import OneClassSVM
 
 def _otsu_rate(scores: np.ndarray) -> float:
-    """
-    Otsu's method: find threshold that minimizes within-class variance
-    of scores, treating them as two populations (clean vs poison).
-    Returns estimated fraction of poison (above threshold).
-    """
     sorted_s = np.sort(scores.astype(np.float64))
     n = len(sorted_s)
     if n < 10:
@@ -60,10 +55,6 @@ def _otsu_rate(scores: np.ndarray) -> float:
 
 
 def _bimodality_coefficient(scores: np.ndarray) -> float:
-    """
-    Sarle's bimodality coefficient. Values > 0.555 suggest bimodal
-    distribution (clear separation between clean and poison scores).
-    """
     from scipy.stats import skew, kurtosis
     n = len(scores)
     if n < 4:
@@ -75,7 +66,6 @@ def _bimodality_coefficient(scores: np.ndarray) -> float:
 
 
 def score_distribution_features(scores: np.ndarray) -> np.ndarray:
-    """16 summary statistics of a score distribution."""
     s = np.sort(scores.astype(np.float64))
     n = len(s)
 
@@ -110,10 +100,8 @@ class RateEstimatorHead(nn.Module):
         return self.net(x).squeeze(-1) * 0.40
 
 
-def estimate_contamination_rate(scores: np.ndarray,
-                                 lo: float = 0.01,
-                                 hi: float = 0.40) -> float:
-    n        = len(scores)
+def estimate_contamination_rate(scores: np.ndarray, lo: float = 0.01, hi: float = 0.40) -> float:
+    n = len(scores)
     sorted_s = np.sort(scores)
     estimates = []
     weights   = []

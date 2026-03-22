@@ -29,3 +29,7 @@ Change Log
 0.1.4 (16/03/2026)
 -----------------------
 - Updated analyze output
+
+0.1.12 (16/03/2026)
+-----------------------
+- Alpha - Beta, fixed few bottlenecks for large datasets

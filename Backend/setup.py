@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Operating System :: Microsoft :: Windows",
     "License :: OSI Approved :: MIT License",
@@ -10,7 +10,7 @@ classifiers = [
 
 setup(
     name="rpfnet",
-    version="0.1.4",
+    version="0.1.12",
     description="RPFNet: Attack-Agnostic Tabular Data Poisoning Detection via Meta-Learned Relational Fingerprints",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",

@@ -1,4 +1,3 @@
-#RPFextractor.py
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -10,6 +9,12 @@ from sklearn.ensemble import (RandomForestClassifier, IsolationForest,
 from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.model_selection import StratifiedKFold
 from sklearn.neighbors import NearestNeighbors
+
+try:
+    import faiss
+    FAISS_AVAILABLE = True
+except ImportError:
+    FAISS_AVAILABLE = False
 
 class RPFExtractor:
     DIM = 61
@@ -29,6 +34,28 @@ class RPFExtractor:
         self.k_small  = k_small
         self.k_large  = k_large
         self.cv_folds = cv_folds
+        self._last_neighbors = None
+
+    def _compute_neighbors(self, X, k):
+        X_f32 = np.ascontiguousarray(X, dtype=np.float32)
+        n, d = X_f32.shape
+        if FAISS_AVAILABLE and n > 500:
+            if n > 50000:
+                nlist = min(256, n // 100)
+                quantizer = faiss.IndexFlatL2(d)
+                index = faiss.IndexIVFFlat(quantizer, d, nlist)
+                index.train(X_f32)
+                index.add(X_f32)
+                index.nprobe = min(32, nlist)
+            else:
+                index = faiss.IndexFlatL2(d)
+                index.add(X_f32)
+            distances, indices = index.search(X_f32, k + 1)
+            return distances[:, 1:], indices[:, 1:]
+        else:
+            nbrs = NearestNeighbors(n_neighbors=k + 1, algorithm="ball_tree").fit(X)
+            D, I = nbrs.kneighbors(X)
+            return D[:, 1:], I[:, 1:]
 
     def extract(self, X: np.ndarray, y: np.ndarray,
                 y_cont: np.ndarray = None) -> np.ndarray:
@@ -39,27 +66,23 @@ class RPFExtractor:
         k2    = max(2, min(self.k_large, n - 2))
         k_max = k2 + 1
 
-        nbrs = NearestNeighbors(n_neighbors=k_max, algorithm="ball_tree").fit(X)
-        D_all, I_all = nbrs.kneighbors(X)
-        D_all = D_all[:, 1:]
-        I_all = I_all[:, 1:]
+        D_all, I_all = self._compute_neighbors(X, k_max)
+        self._last_neighbors = (I_all, D_all)
 
         self._block_a(X, y, rpf, k1, k2, D_all, I_all)
         self._block_b(X, y, rpf)
         self._block_c(X, y, rpf)
         self._block_d_oof(X, y, rpf)
         self._block_e(X, y, rpf, k2, D_all, I_all)
-        self._block_f(X, y, rpf, y_cont=y_cont)
+        self._block_f(X, y, rpf, D_all, I_all, y_cont=y_cont)
         self._block_g(X, y, rpf, k2, D_all, I_all)
 
-        # Z-score normalise per-feature
         mu  = rpf.mean(0, keepdims=True)
         std = rpf.std(0,  keepdims=True) + 1e-8
         rpf = (rpf - mu) / std
 
         return rpf.astype(np.float32)
 
-    # Block A
     def _block_a(self, X, y, rpf, k1, k2, D_all, I_all):
         for slot, k in enumerate([k1, k2]):
             D  = D_all[:, :k]
@@ -90,7 +113,6 @@ class RPFExtractor:
             rpf[:, b + 2] = entropy
             rpf[:, b + 3] = near_ratio
 
-    # Block B
     def _block_b(self, X, y, rpf):
         n       = len(X)
         classes = np.unique(y)
@@ -165,8 +187,6 @@ class RPFExtractor:
         rpf[:, 15] = bd
         rpf[:, 16] = pca_dist
 
-    # Block C
-
     def _block_c(self, X, y, rpf):
         n = len(X)
         classes = np.unique(y)
@@ -207,7 +227,6 @@ class RPFExtractor:
         rpf[:, 19] = rel_scale
         rpf[:, 20] = mad
 
-    # Block D
     def _block_d_oof(self, X: np.ndarray, y: np.ndarray, rpf: np.ndarray):
         n       = len(X)
         classes = np.unique(y)
@@ -306,7 +325,6 @@ class RPFExtractor:
         confidence = prf_true.copy()
         flip_ind = (prf_true < rand_thresh).astype(np.float32)
 
-        # 3-model disagreement score
         disagree_3 = (np.abs(plr_true - pgb_true)
                       + np.abs(prf_true - pgb_true)
                       + np.abs(plr_true - prf_true)).astype(np.float32) / 3.0
@@ -325,7 +343,6 @@ class RPFExtractor:
         rpf[:, 32] = flip_ind
         rpf[:, 33] = disagree_3
 
-    # Block E
     def _block_e(self, X, y, rpf, k2, D_all, I_all):
         n = len(X)
         k = min(k2, n - 2)
@@ -422,16 +439,14 @@ class RPFExtractor:
         except Exception:
             rpf[:, 46] = 0.0
 
-    #  Block F: Regression/Influence Features 
     def _block_f(self, X: np.ndarray, y: np.ndarray, rpf: np.ndarray,
+                 D_all: np.ndarray, I_all: np.ndarray,
                  y_cont: np.ndarray = None):
         n, d = X.shape
 
-        # Use continuous target if available, else cast labels to float
         y_reg = y_cont.astype(np.float64) if y_cont is not None \
                 else y.astype(np.float64)
 
-        # Fit ridge regression
         try:
             ridge = Ridge(alpha=1.0).fit(X.astype(np.float64), y_reg)
             y_hat = ridge.predict(X.astype(np.float64))
@@ -440,9 +455,7 @@ class RPFExtractor:
             rpf[:, 47:55] = 0.0
             return
 
-        # Leverage (hat matrix diagonal)
         try:
-            # H = X(X'X + αI)^{-1}X'  — diagonal only
             XtX_inv = np.linalg.inv(
                 X.astype(np.float64).T @ X.astype(np.float64)
                 + 1.0 * np.eye(d, dtype=np.float64))
@@ -453,30 +466,22 @@ class RPFExtractor:
 
         rpf[:, 47] = rankdata(H_diag).astype(np.float32) / n
 
-        # Studentized residual 
         mse = (resid ** 2).mean() + 1e-8
         stud_resid = resid / np.sqrt(mse * (1 - np.clip(H_diag, 0, 0.999) + 1e-8))
         rpf[:, 48] = rankdata(np.abs(stud_resid)).astype(np.float32) / n
 
-        # Cook's distance
         p = min(d, n - 1)
         cooks_d = (stud_resid ** 2 / max(p, 1)) * (H_diag / (1 - H_diag + 1e-8))
         rpf[:, 49] = rankdata(cooks_d).astype(np.float32) / n
 
-        # DFFITS 
         dffits = stud_resid * np.sqrt(H_diag / (1 - H_diag + 1e-8))
         rpf[:, 50] = rankdata(np.abs(dffits)).astype(np.float32) / n
 
-        try:
-            k = max(2, min(10, n - 2))
-            nbrs = NearestNeighbors(n_neighbors=k + 1, algorithm="ball_tree").fit(X)
-            _, I_local = nbrs.kneighbors(X)
-            I_local = I_local[:, 1:]  # exclude self
-            nb_resid = resid[I_local]
-            sign_agree = (np.sign(nb_resid) == np.sign(resid[:, np.newaxis])).mean(1)
-            rpf[:, 51] = sign_agree.astype(np.float32)
-        except Exception:
-            rpf[:, 51] = 0.5
+        k = max(2, min(10, n - 2))
+        I_local = I_all[:, :k]
+        nb_resid = resid[I_local]
+        sign_agree = (np.sign(nb_resid) == np.sign(resid[:, np.newaxis])).mean(1)
+        rpf[:, 51] = sign_agree.astype(np.float32)
 
         pred_rank = np.zeros(n, np.float32)
         classes = np.unique(y)
@@ -496,54 +501,69 @@ class RPFExtractor:
         k = min(k2, D_all.shape[1])
         I = I_all[:, :k]
         D = D_all[:, :k]
-        rev_counts = np.zeros(n, dtype=np.float32)
+
+        I_flat = I.ravel()
+        rev_counts = np.bincount(I_flat, minlength=n).astype(np.float32)
 
         rev_mean = rev_counts.mean() + 1e-8
         rpf[:, 55] = rev_counts / rev_mean
 
-        pos_sum = np.zeros(n, dtype=np.float64)
-        pos_cnt = np.zeros(n, dtype=np.float64)
-        for p in range(k):
-            targets = I[:, p]
-            np.add.at(pos_sum, targets, float(p))
-            np.add.at(pos_cnt, targets, 1.0)
+        pos_vals = np.tile(np.arange(k, dtype=np.float64), n)
+        pos_sum = np.bincount(I_flat, weights=pos_vals, minlength=n)
+        pos_cnt = np.bincount(I_flat, minlength=n).astype(np.float64)
 
         avg_position = pos_sum / (pos_cnt + 1e-8)
         embedding_depth = (1.0 - avg_position / (k + 1e-8)).astype(np.float32)
 
         rpf[:, 56] = embedding_depth
 
-        rev_adj = [[] for _ in range(n)]
+        rev_adj_starts = np.zeros(n + 1, dtype=np.int64)
+        for target in I_flat:
+            rev_adj_starts[target + 1] += 1
+        np.cumsum(rev_adj_starts, out=rev_adj_starts)
+
+        rev_adj_flat = np.empty(len(I_flat), dtype=np.int64)
+        write_pos = rev_adj_starts[:-1].copy()
         for j in range(n):
             for p in range(k):
-                rev_adj[I[j, p]].append(j)
+                target = I[j, p]
+                rev_adj_flat[write_pos[target]] = j
+                write_pos[target] += 1
 
-        hop1_sizes = np.array([len(rev_adj[i]) for i in range(n)],
-                               dtype=np.float32)
+        hop1_sizes = (rev_adj_starts[1:] - rev_adj_starts[:-1]).astype(np.float32)
         hop2_sizes = np.zeros(n, dtype=np.float32)
 
-        # For large datasets
-        max_hop1_expand = 200  # cap inner loop breadth
+        max_hop1_expand = 200
+        rng = np.random.default_rng(42)
 
         for i in range(n):
-            hop1 = rev_adj[i]
-            if len(hop1) == 0:
+            h1_start = rev_adj_starts[i]
+            h1_end = rev_adj_starts[i + 1]
+            h1_count = h1_end - h1_start
+            if h1_count == 0:
                 continue
-            hop2_set = set()
+
+            hop1 = rev_adj_flat[h1_start:h1_end]
             hop1_set = set(hop1)
-            expand = hop1 if len(hop1) <= max_hop1_expand else \
-                     [hop1[idx] for idx in
-                      np.random.default_rng(i).choice(
-                          len(hop1), max_hop1_expand, replace=False)]
+
+            if h1_count <= max_hop1_expand:
+                expand = hop1
+                scale = 1.0
+            else:
+                expand = rng.choice(hop1, max_hop1_expand, replace=False)
+                scale = h1_count / max_hop1_expand
+
+            hop2_set = set()
             for j in expand:
-                for m in rev_adj[j]:
+                j_start = rev_adj_starts[j]
+                j_end = rev_adj_starts[j + 1]
+                for idx in range(j_start, j_end):
+                    m = rev_adj_flat[idx]
                     if m != i and m not in hop1_set:
                         hop2_set.add(m)
-            # Scale up if we subsampled
-            scale = len(hop1) / len(expand) if len(expand) > 0 else 1.0
+
             hop2_sizes[i] = len(hop2_set) * scale
 
-        # 2-hop echo magnitude
         hop2_mean = hop2_sizes.mean() + 1e-8
         rpf[:, 57] = hop2_sizes / hop2_mean
 
@@ -555,7 +575,7 @@ class RPFExtractor:
 
         disp_sum = np.zeros(n, dtype=np.float64)
         disp_cnt = np.zeros(n, dtype=np.float64)
-        boundary = D[:, -1]  # each sample's kth-neighbor distance
+        boundary = D[:, -1]
 
         for p in range(k):
             targets = I[:, p]
@@ -565,5 +585,4 @@ class RPFExtractor:
 
         displacement = (disp_sum / (disp_cnt + 1e-8)).astype(np.float32)
 
-        # G5: Displacement cost
         rpf[:, 60] = rankdata(displacement).astype(np.float32) / n
