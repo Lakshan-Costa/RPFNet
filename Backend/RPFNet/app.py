@@ -368,6 +368,7 @@ def _estimate_contamination_rate_safe(scores: np.ndarray, scoring_mode: str = "i
 
 def _score_dataframe(df: pd.DataFrame, tau_override: float | None = None,
                       dataset_hint: str = "") -> dict:
+    DATASET_THRESHOLDS.clear()
     X, y, sc, Xdf = _prepare(df)
     n = len(X)
 
@@ -423,14 +424,6 @@ def _score_dataframe(df: pd.DataFrame, tau_override: float | None = None,
     # Flag rows
     flags     = (raw_scores >= tau_raw).astype(int).tolist()
     n_flagged = sum(flags)
-    k = int(0.8 * len(raw_scores))
-    clean_idx = np.argsort(raw_scores)[:k]
-
-    clean_mask = np.zeros(len(raw_scores), dtype=bool)
-    clean_mask[clean_idx] = True
-
-    X_clean = X[clean_mask]
-    y_clean = y[clean_mask]
     pct_flagged = round(n_flagged / n * 100, 2) if n > 0 else 0.0
 
     invariant_violations = []
@@ -444,7 +437,7 @@ def _score_dataframe(df: pd.DataFrame, tau_override: float | None = None,
             extractor = RPFExtractor()
             rpf = extractor.extract(X, y)
 
-        _invariant_analyzer.fit_clean_bounds(X_clean, y_clean)
+        _invariant_analyzer.fit_clean_bounds(X, y)
         # Compute invariant scores per row
         row_violations_dict = _invariant_analyzer.compute_row_violations(X, y)
 
