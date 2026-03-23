@@ -372,7 +372,7 @@ export default function App() {
           {details!.map((vd, idx) => (
             <div key={idx}>
               <span style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 2 }}>
-                <strong style={{ fontSize: 13 }}>{vd.is_primary ? "Primary " : ""}{vd.invariant}</strong>
+                <strong style={{ fontSize: 13 }}>{vd.is_primary ? "Primary Invariant - " : ""}{vd.invariant}</strong>
                 <span style={{ fontSize: 12, opacity: 0.8 }}>
                   {INVARIANT_INFO[vd.invariant]?.name ?? "Unknown"}
                 </span>
