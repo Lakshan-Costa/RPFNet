@@ -2,6 +2,24 @@ import React, { useEffect, useMemo, useState } from "react";
 import { announceToScreenReader, getStatusAriaLabel } from "./a11y";
 import fetchWithFallback from "./api";
 
+type ViolationDetail = {
+  invariant: string;
+  cells?: CellViolation[];
+  is_primary?: boolean;
+};
+
+type CellViolation = {
+  feature: string;
+  col_index: number;
+  value: number | string;
+  expected_range?: [number, number];
+  nearest_class?: string;
+  own_class?: string;
+  neighbor_labels?: string[];
+  influence_score?: number;
+  detail?: string;
+};
+
 type Row = {
   id?: string;
   dataset?: string;
@@ -9,6 +27,7 @@ type Row = {
   y_true?: number;
   flagged?: number;
   reasons?: string[];
+  violation_details?: ViolationDetail[];
 };
 
 type Metrics = {
@@ -204,10 +223,8 @@ export default function App() {
         const resHealth = await fetchWithFallback(`/health`);
         const h = await resHealth.json();
         setHealth(h);
-        // update thresholds state
         setUsedTau(h.global_threshold || 3.5);
         setInteractiveTau(h.global_threshold || 3.5);
-
       } catch (e) {
         console.error("Failed to fetch health/thresholds:", e);
       }
@@ -215,12 +232,19 @@ export default function App() {
   }, []);
 
   function loadFromBackend(res: any) {
-    const newRows: Row[] = res.scores.map((s: number, i: number) => ({
-      id: String(i),
-      score: s,
-      flagged: res.flags[i],
-      reasons: res.invariant_violations?.[i] || [],
-    }));
+    const newRows: Row[] = res.scores.map((s: number, i: number) => {
+      const legacyReasons: string[] = res.invariant_violations?.[i] || [];
+
+      const richDetails: ViolationDetail[] | undefined = res.violation_details?.[i];
+
+      return {
+        id: String(i),
+        score: s,
+        flagged: res.flags[i],
+        reasons: legacyReasons,
+        violation_details: richDetails ?? legacyReasons.map(r => ({ invariant: r })),
+      };
+    });
     setRows(newRows);
     setDatasetId(res.dataset_id || null);
     setThresholdSource(res.threshold_source || "unknown");
@@ -230,8 +254,106 @@ export default function App() {
     setTopK(prev => Math.min(prev, newRows.length));
   }
 
-  function formatReasons(reasons?: string[], isFlagged?: boolean) {
-    if (!reasons || reasons.length === 0) {
+  /* ── Cell Violation Chip ──────────────────────────────────── */
+
+  function CellChip({ cell, themeColors }: { cell: CellViolation; themeColors: typeof t }) {
+    const [expanded, setExpanded] = useState(false);
+
+    return (
+      <span
+        onClick={() => setExpanded(!expanded)}
+        style={{
+          display: "inline-flex",
+          flexDirection: "column",
+          cursor: "pointer",
+          background: theme === "dark" ? "rgba(255,107,107,0.12)" : "rgba(220,50,50,0.08)",
+          border: `1px solid ${theme === "dark" ? "rgba(255,107,107,0.3)" : "rgba(220,50,50,0.2)"}`,
+          borderRadius: 6,
+          padding: "3px 8px",
+          fontSize: 12,
+          lineHeight: 1.4,
+          marginRight: 4,
+          marginBottom: 4,
+          transition: "all 0.15s ease",
+          maxWidth: expanded ? 340 : 200,
+        }}
+        title={`Click to ${expanded ? "collapse" : "expand"} details for feature "${cell.feature}"`}
+        aria-expanded={expanded}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setExpanded(!expanded); }}
+      >
+        <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          <span style={{
+            fontFamily: "monospace",
+            fontWeight: 700,
+            color: theme === "dark" ? "#ff9a9a" : "#c0392b",
+          }}>
+            {cell.feature}
+          </span>
+          <span style={{ opacity: 0.6, fontSize: 11 }}>
+            [col {cell.col_index}]
+          </span>
+          <span style={{ opacity: 0.5, fontSize: 10, marginLeft: "auto" }}>
+            {expanded ? "▲" : "▼"}
+          </span>
+        </span>
+
+        <span style={{ fontFamily: "monospace", fontSize: 11 }}>
+          val = <strong>{typeof cell.value === "number" ? cell.value.toFixed(4) : String(cell.value)}</strong>
+        </span>
+
+        {expanded && (
+          <span style={{
+            marginTop: 4,
+            paddingTop: 4,
+            borderTop: `1px solid ${theme === "dark" ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.08)"}`,
+            fontSize: 11,
+            lineHeight: 1.5,
+            color: themeColors.subtext,
+          }}>
+            {cell.expected_range && (
+              <span style={{ display: "block" }}>
+                Expected range: [{cell.expected_range[0].toFixed(3)}, {cell.expected_range[1].toFixed(3)}]
+              </span>
+            )}
+            {cell.own_class && cell.nearest_class && (
+              <span style={{ display: "block" }}>
+                Own class: <strong>{cell.own_class}</strong> → Nearest: <strong>{cell.nearest_class}</strong>
+              </span>
+            )}
+            {cell.neighbor_labels && cell.neighbor_labels.length > 0 && (
+              <span style={{ display: "block" }}>
+                Neighbor labels: {cell.neighbor_labels.join(", ")}
+              </span>
+            )}
+            {cell.influence_score != null && (
+              <span style={{ display: "block" }}>
+                Influence: <strong>{cell.influence_score.toFixed(4)}</strong>
+              </span>
+            )}
+            {cell.detail && (
+              <span style={{ display: "block", fontStyle: "italic", opacity: 0.85 }}>
+                {cell.detail}
+              </span>
+            )}
+          </span>
+        )}
+      </span>
+    );
+  }
+
+  /* ── Format Reasons (with cell-level detail) ─────────────── */
+
+  function formatReasons(row: Row, isFlagged?: boolean) {
+    const details = row.violation_details;
+    const reasons = row.reasons;
+
+    // No violations at all
+    const hasDetails = details && details.length > 0;
+    const hasReasons = reasons && reasons.length > 0;
+
+    if (!hasDetails && !hasReasons) {
       if (isFlagged) {
         return (
           <span>
@@ -243,9 +365,41 @@ export default function App() {
       return "";
     }
 
+    // If we have rich violation_details with cell info, render those
+    if (hasDetails) {
+      return (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {details!.map((vd, idx) => (
+            <div key={idx}>
+              <span style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 2 }}>
+                <strong style={{ fontSize: 13 }}>{vd.is_primary ? "Primary " : ""}{vd.invariant}</strong>
+                <span style={{ fontSize: 12, opacity: 0.8 }}>
+                  {INVARIANT_INFO[vd.invariant]?.name ?? "Unknown"}
+                </span>
+                <InfoTooltip text={INVARIANT_INFO[vd.invariant]?.desc || ""} />
+              </span>
+
+              {vd.cells && vd.cells.length > 0 ? (
+                <div style={{ display: "flex", flexWrap: "wrap", marginTop: 2 }}>
+                  {vd.cells.map((cell, ci) => (
+                    <CellChip key={ci} cell={cell} themeColors={t} />
+                  ))}
+                </div>
+              ) : (
+                <span style={{ fontSize: 11, opacity: 0.6, fontStyle: "italic" }}>
+                  (no cell-level detail available)
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    // Fallback: legacy string[] reasons
     return (
       <>
-        {reasons.map((r, idx) => (
+        {reasons!.map((r, idx) => (
           <span key={idx} style={{ marginRight: 8 }}>
             <strong>{r}</strong>: {INVARIANT_INFO[r]?.name}
             <InfoTooltip text={INVARIANT_INFO[r]?.desc || ""} />
@@ -267,7 +421,7 @@ export default function App() {
             cursor: "pointer",
             fontSize: 12,
             borderRadius: "50%",
-            border: "1px solid rgba(255,255,255,0.4)",
+            border: `1px solid ${theme === "dark" ? "rgba(255,255,255,0.4)" : "rgba(0,0,0,0.3)"}`,
             padding: "0 5px",
             display: "inline-block",
             lineHeight: "16px",
@@ -283,14 +437,15 @@ export default function App() {
               position: "absolute",
               top: "120%",
               left: 0,
-              background: "#111",
-              color: "#fff",
+              background: theme === "dark" ? "#111" : "#fff",
+              color: theme === "dark" ? "#fff" : "#111",
               padding: "10px 12px",
               borderRadius: 6,
               width: 280,
               fontSize: 12,
               zIndex: 999,
-              border: "1px solid rgba(255,255,255,0.2)",
+              border: `1px solid ${theme === "dark" ? "rgba(255,255,255,0.2)" : "rgba(0,0,0,0.15)"}`,
+              boxShadow: "0 4px 12px rgba(0,0,0,0.25)",
             }}
           >
             {text}
@@ -306,7 +461,6 @@ async function exportCleanDataset() {
     return;
   }
 
-  // collect clean row indices
   const cleanIds = rows
     .filter(r => r.score < interactiveTau && r.flagged !== 1)
     .map(r => Number(r.id));
@@ -461,8 +615,6 @@ async function exportCleanDataset() {
                       key={type}
                       onClick={() => {
                         setSourceType(type as any);
-
-                        // Clear other inputs when switching
                         setCsvFile(null);
                         setCsvUrl("");
                         setUciId("");
@@ -843,7 +995,6 @@ async function exportCleanDataset() {
                       background: topK === v ? "#1f7ae0" : t.bg ,
                       color: t.text,
                       border: t.border,
-                      
                       cursor: "pointer",
                       opacity: topK === v ? 1 : 0.85,
                       minHeight: "36px",
@@ -860,18 +1011,20 @@ async function exportCleanDataset() {
             <div style={{ opacity: 0.7 }}>No data loaded. Upload a dataset to get started.</div>
           ) : (
             <div className={theme === "dark" ? "dark-scroll" : "light-scroll"}
-              style={{ overflow: "auto", maxHeight: 360 }}>
+              style={{ overflow: "auto", maxHeight: 460 }}>
               <table 
                 style={{ width: "100%", borderCollapse: "collapse", fontSize: 16 }}
                 role="table"
                 aria-label="Most suspicious rows by anomaly score"
               >
                 <thead>
-                  <tr style={{ textAlign: "left", borderBottom: "2px solid rgba(255,255,255,0.12)" }}>
+                  <tr style={{ textAlign: "left", borderBottom: `2px solid ${t.border}` }}>
                     <th scope="col" style={{ padding: "8px 6px", fontWeight: 700 }}>Row ID</th>
                     <th scope="col" style={{ padding: "8px 6px", fontWeight: 700 }}>Anomaly Score</th>
                     <th scope="col" style={{ padding: "8px 6px", fontWeight: 700 }}>Status</th>
-                    <th scope="col" style={{ padding: "8px 6px", fontWeight: 700 }}>Reason</th>
+                    <th scope="col" style={{ padding: "8px 6px", fontWeight: 700, minWidth: 280 }}>
+                      Violated Invariants & Cells
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -879,15 +1032,15 @@ async function exportCleanDataset() {
                     .sort((a, b) => b.score - a.score)
                     .slice(0, topK)
                     .map((r, i) => (
-                      <tr key={i} style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                      <tr key={i} style={{ borderBottom: `1px solid ${theme === "dark" ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)"}`, verticalAlign: "top" }}>
                         <td style={{ padding: "8px 6px" }}>{r.id ?? `row_${i}`}</td>
-                        <td style={{ padding: "8px 6px" }}>{formatNum(r.score, 4)}</td>
+                        <td style={{ padding: "8px 6px", fontFamily: "monospace" }}>{formatNum(r.score, 4)}</td>
                         <td style={{ padding: "8px 6px" }}>
                           <span
                             style={{
                               padding: "4px 8px",
                               borderRadius: 999,
-                              border: "1px solid rgba(255,255,255,0.15)",
+                              border: `1px solid ${t.border}`,
                               opacity: r.score >= interactiveTau ? 1 : 0.6,
                               backgroundColor: r.score >= interactiveTau ? "rgba(255,107,107,0.2)" : "rgba(78,205,196,0.2)",
                             }}
@@ -899,7 +1052,7 @@ async function exportCleanDataset() {
                         <td style={{ padding: "8px 6px" }}>
                           {r.score >= interactiveTau ? (
                             <span>
-                              {formatReasons(r.reasons, r.score >= interactiveTau)}
+                              {formatReasons(r, r.score >= interactiveTau)}
                             </span>
                           ) : (
                             ""
@@ -967,12 +1120,6 @@ function ScoreScatter({ rows, tau, height = 260, theme }: { rows: Row[]; tau: nu
     }
 
     const ys = sampled.map((p) => p.y).sort((a, b) => a - b);
-    // const q = (arr: number[], qq: number) => {
-    //   const pos = (arr.length - 1) * Math.max(0, Math.min(1, qq));
-    //   const base = Math.floor(pos);
-    //   const rest = pos - base;
-    //   return arr[base + 1] !== undefined ? arr[base] + rest * (arr[base + 1] - arr[base]) : arr[base];
-    // };
 
     const yLo = Math.min(...ys);
     const yHi = Math.max(...ys);

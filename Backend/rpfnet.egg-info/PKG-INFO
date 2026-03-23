@@ -1,6 +1,6 @@
 Metadata-Version: 2.1
 Name: rpfnet
-Version: 0.1.12
+Version: 0.1.14
 Summary: RPFNet: Attack-Agnostic Tabular Data Poisoning Detection via Meta-Learned Relational Fingerprints
 Home-page: https://github.com/lakshancosta/RPFNet
 Author: Lakshan Costa
@@ -90,7 +90,7 @@ For real-time or incremental data pipelines, RPFNet supports row-by-row streamin
 import pandas as pd
 from RPFNet import api
 
-# Existing dataset â€” used as baseline
+# Existing dataset - used as baseline
 existing = pd.read_csv('dataset.csv')
 api.analyze('stream', existing)
 

@@ -21,6 +21,11 @@ class RelationalInvariant:
     def estimate_clean_bound(self, stats_clean, alpha=0.05):
         return float(np.percentile(stats_clean, 100 * (1 - alpha)))
 
+    def explain_row(self, row_idx, X, y, feature_names=None, y_cont=None):
+        """Return a list of CellViolation dicts for one violated row.
+        Subclasses override to provide invariant-specific detail."""
+        return []
+
 
 class NeighborhoodConsistency(RelationalInvariant):
     def __init__(self):
@@ -28,6 +33,8 @@ class NeighborhoodConsistency(RelationalInvariant):
             "I1: Neighborhood consistency", "I1:Neigh",
             "k-NN label agreement (excess over chance) bounded below",
             [slice(0, 8)])
+        self._last_neighbor_indices = None
+        self._last_agreement = None
 
     def compute_statistic(self, X, y, rpf=None, y_cont=None):
         n = len(X)
@@ -37,10 +44,45 @@ class NeighborhoodConsistency(RelationalInvariant):
         nbrs = NearestNeighbors(n_neighbors=k + 1, algorithm="ball_tree").fit(X)
         _, I = nbrs.kneighbors(X)
         I = I[:, 1:]
+        self._last_neighbor_indices = I
         agreement = (y[I] == y[:, np.newaxis]).mean(1)
+        self._last_agreement = agreement
         denom = max(1.0 - chance, 1e-8)
         excess = np.clip((agreement - chance) / denom, 0.0, 1.0)
         return (1.0 - excess).astype(np.float32)
+
+    def explain_row(self, row_idx, X, y, feature_names=None, y_cont=None):
+        if self._last_neighbor_indices is None:
+            return []
+
+        neigh_idx = self._last_neighbor_indices[row_idx]
+        neigh_labels = y[neigh_idx].tolist()
+        own_label = int(y[row_idx])
+        n_disagree = sum(1 for lb in neigh_labels if lb != own_label)
+        n_total = len(neigh_labels)
+
+        if n_disagree == 0:
+            return []
+
+        # Features where this row differs most from its neighbors
+        neigh_mean = X[neigh_idx].mean(axis=0)
+        feature_diffs = np.abs(X[row_idx] - neigh_mean)
+        top_k = min(3, len(feature_diffs))
+        top_features = np.argsort(feature_diffs)[-top_k:][::-1]
+
+        cells = []
+        for fi in top_features:
+            fname = feature_names[fi] if feature_names is not None else f"feat_{fi}"
+            cells.append({
+                "feature": fname,
+                "col_index": int(fi),
+                "value": float(X[row_idx, fi]),
+                "neighbor_labels": [str(lb) for lb in neigh_labels],
+                "detail": (f"{n_disagree}/{n_total} neighbors disagree with label {own_label}; "
+                           f"feature deviates {feature_diffs[fi]:.3f} from neighbor mean "
+                           f"({neigh_mean[fi]:.3f})")
+            })
+        return cells
 
 
 class GeometricCoherence(RelationalInvariant):
@@ -49,6 +91,8 @@ class GeometricCoherence(RelationalInvariant):
             "I2: Geometric coherence", "I2:Geom",
             "Distance to own centroid < distance to nearest other",
             [slice(8, 17)])
+        self._centroids = None
+        self._last_nearest_class = None
 
     def compute_statistic(self, X, y, rpf=None, y_cont=None):
         n = len(X)
@@ -59,14 +103,61 @@ class GeometricCoherence(RelationalInvariant):
         for c in classes:
             idx = np.where(y == c)[0]
             mus[c] = X[idx].mean(0) if len(idx) >= 2 else X.mean(0)
+        self._centroids = mus
+        self._last_nearest_class = np.full(n, -1, dtype=int)
+
         violation = np.zeros(n, np.float32)
         for i in range(n):
             d_own = np.linalg.norm(X[i] - mus.get(y[i], X.mean(0)))
-            d_other = min(
-                (np.linalg.norm(X[i] - mus[c]) for c in classes if c != y[i]),
-                default=d_own * 2)
-            violation[i] = np.log1p(d_own + 1e-8) - np.log1p(d_other + 1e-8)
+            best_d_other = np.inf
+            best_c_other = -1
+            for c in classes:
+                if c != y[i]:
+                    d = np.linalg.norm(X[i] - mus[c])
+                    if d < best_d_other:
+                        best_d_other = d
+                        best_c_other = c
+            if best_d_other == np.inf:
+                best_d_other = d_own * 2
+            self._last_nearest_class[i] = best_c_other
+            violation[i] = np.log1p(d_own + 1e-8) - np.log1p(best_d_other + 1e-8)
         return violation
+
+    def explain_row(self, row_idx, X, y, feature_names=None, y_cont=None):
+        if self._centroids is None or self._last_nearest_class is None:
+            return []
+
+        own_class = int(y[row_idx])
+        nearest_class = int(self._last_nearest_class[row_idx])
+        if nearest_class < 0:
+            return []
+
+        own_centroid = self._centroids.get(own_class, X.mean(0))
+        other_centroid = self._centroids.get(nearest_class, X.mean(0))
+
+        diff_own = np.abs(X[row_idx] - own_centroid)
+        diff_other = np.abs(X[row_idx] - other_centroid)
+        misalignment = diff_own - diff_other  # positive = closer to OTHER
+
+        top_k = min(3, len(misalignment))
+        top_features = np.argsort(misalignment)[-top_k:][::-1]
+
+        cells = []
+        for fi in top_features:
+            if misalignment[fi] <= 0:
+                continue
+            fname = feature_names[fi] if feature_names is not None else f"feat_{fi}"
+            cells.append({
+                "feature": fname,
+                "col_index": int(fi),
+                "value": float(X[row_idx, fi]),
+                "own_class": str(own_class),
+                "nearest_class": str(nearest_class),
+                "detail": (f"Closer to class {nearest_class} centroid "
+                           f"({other_centroid[fi]:.3f}) than own class {own_class} "
+                           f"({own_centroid[fi]:.3f}) by {misalignment[fi]:.3f}")
+            })
+        return cells
 
 
 class InfluenceBoundedness(RelationalInvariant):
@@ -75,6 +166,8 @@ class InfluenceBoundedness(RelationalInvariant):
             "I3: Influence boundedness", "I3:Infl",
             "LOO influence bounded for clean sub-Gaussian data",
             [slice(21, 34), slice(47, 55)])
+        self._last_cooks = None
+        self._last_leverage = None
 
     def compute_statistic(self, X, y, rpf=None, y_cont=None):
         n, d = X.shape
@@ -92,9 +185,45 @@ class InfluenceBoundedness(RelationalInvariant):
             mse = (resid ** 2).mean() + 1e-8
             stud = resid / np.sqrt(mse * (1 - np.clip(H_diag, 0, 0.999) + 1e-8))
             cooks = (stud ** 2 / max(min(d, n-1), 1)) * (H_diag / (1 - H_diag + 1e-8))
+            self._last_cooks = cooks.astype(np.float32)
+            self._last_leverage = H_diag.astype(np.float32)
             return cooks.astype(np.float32)
         except Exception:
+            self._last_cooks = np.zeros(n, np.float32)
+            self._last_leverage = np.zeros(n, np.float32)
             return np.zeros(n, np.float32)
+
+    def explain_row(self, row_idx, X, y, feature_names=None, y_cont=None):
+        if self._last_leverage is None:
+            return []
+
+        leverage = float(self._last_leverage[row_idx])
+        influence = float(self._last_cooks[row_idx]) if self._last_cooks is not None else 0.0
+
+        feat_abs = np.abs(X[row_idx])
+        top_k = min(3, len(feat_abs))
+        top_features = np.argsort(feat_abs)[-top_k:][::-1]
+
+        cells = []
+        for fi in top_features:
+            fname = feature_names[fi] if feature_names is not None else f"feat_{fi}"
+            col_mean = float(np.mean(np.abs(X[:, fi])))
+            col_std = float(np.std(np.abs(X[:, fi]))) + 1e-8
+            z_score = (feat_abs[fi] - col_mean) / col_std
+
+            cells.append({
+                "feature": fname,
+                "col_index": int(fi),
+                "value": float(X[row_idx, fi]),
+                "influence_score": influence,
+                "detail": (
+                    f"This value is unusually large compared to other rows. "
+                    f"It differs significantly from the typical value in this column "
+                    f"(average ≈ {col_mean:.2f}). "
+                    f"This row also has a strong influence on the model's predictions."
+                )
+            })
+        return cells
 
 
 class StructuralStability(RelationalInvariant):
@@ -103,6 +232,8 @@ class StructuralStability(RelationalInvariant):
             "I4: Structural stability", "I4:Struct",
             "Graph centrality x label disagreement bounded above",
             [slice(55, 61)])
+        self._last_centrality = None
+        self._last_excess = None
 
     def compute_statistic(self, X, y, rpf=None, y_cont=None):
         n = len(X)
@@ -115,10 +246,37 @@ class StructuralStability(RelationalInvariant):
         rev_counts = np.zeros(n, np.float32)
         np.add.at(rev_counts, I.ravel(), 1.0)
         centrality = rev_counts / (rev_counts.mean() + 1e-8)
+        self._last_centrality = centrality
         raw_agree = (y[I] == y[:, np.newaxis]).mean(1).astype(np.float32)
         denom = max(1.0 - chance, 1e-8)
         excess = np.clip((raw_agree - chance) / denom, 0.0, 1.0)
+        self._last_excess = excess
         return (centrality * (1.0 - excess + 0.01)).astype(np.float32)
+
+    def explain_row(self, row_idx, X, y, feature_names=None, y_cont=None):
+        if self._last_centrality is None:
+            return []
+
+        centrality = float(self._last_centrality[row_idx])
+        agreement = float(self._last_excess[row_idx])
+
+        global_mean = X.mean(axis=0)
+        closeness = -np.abs(X[row_idx] - global_mean)
+        top_k = min(3, len(closeness))
+        top_features = np.argsort(closeness)[-top_k:][::-1]
+
+        cells = []
+        for fi in top_features:
+            fname = feature_names[fi] if feature_names is not None else f"feat_{fi}"
+            cells.append({
+                "feature": fname,
+                "col_index": int(fi),
+                "value": float(X[row_idx, fi]),
+                "detail": (f"Centrality={centrality:.3f}, "
+                           f"label agreement={agreement:.3f}; "
+                           f"deviation from mean: {abs(X[row_idx, fi] - global_mean[fi]):.3f}")
+            })
+        return cells
 
 
 class ScaleConsistency(RelationalInvariant):
@@ -127,6 +285,7 @@ class ScaleConsistency(RelationalInvariant):
             "I5: Scale consistency", "I5:Scale",
             "Feature magnitude consistent within class",
             [slice(17, 21)])
+        self._last_class_stats = None
 
     def compute_statistic(self, X, y, rpf=None, y_cont=None):
         n = len(X)
@@ -135,16 +294,57 @@ class ScaleConsistency(RelationalInvariant):
 
         l2_z = np.zeros(n, np.float32)
         rel_scale = np.zeros(n, np.float32)
+
+        self._last_class_stats = {}
         for c in classes:
             idx = np.where(y == c)[0]
             if len(idx) < 2:
                 continue
+            self._last_class_stats[int(c)] = {
+                "feat_mean": X[idx].mean(axis=0),
+                "feat_std": X[idx].std(axis=0) + 1e-8,
+            }
             mu = l2[idx].mean()
             sd = l2[idx].std() + 1e-8
             l2_z[idx] = np.abs((l2[idx] - mu) / sd)
             rel_scale[idx] = np.abs(np.log(l2[idx] / (mu + 1e-8) + 1e-8))
 
         return ((l2_z + rel_scale) / 2.0).astype(np.float32)
+
+    def explain_row(self, row_idx, X, y, feature_names=None, y_cont=None):
+        if self._last_class_stats is None:
+            return []
+
+        own_class = int(y[row_idx])
+        cstats = self._last_class_stats.get(own_class)
+        if cstats is None:
+            return []
+
+        feat_mean = cstats["feat_mean"]
+        feat_std = cstats["feat_std"]
+
+        z_scores = np.abs((X[row_idx] - feat_mean) / feat_std)
+        top_k = min(3, len(z_scores))
+        top_features = np.argsort(z_scores)[-top_k:][::-1]
+
+        cells = []
+        for fi in top_features:
+            z = z_scores[fi]
+            if z < 2.0:
+                continue
+            fname = feature_names[fi] if feature_names is not None else f"feat_{fi}"
+            lo = float(feat_mean[fi] - 2 * feat_std[fi])
+            hi = float(feat_mean[fi] + 2 * feat_std[fi])
+            cells.append({
+                "feature": fname,
+                "col_index": int(fi),
+                "value": float(X[row_idx, fi]),
+                "expected_range": [round(lo, 4), round(hi, 4)],
+                "detail": (f"z-score={z:.2f} within class {own_class}; "
+                           f"expected [{lo:.3f}, {hi:.3f}], got {X[row_idx, fi]:.3f}")
+            })
+        return cells
+
 
 #  EFFECTIVENESS FILTER
 def measure_attack_effectiveness(X_clean, y_clean, X_poisoned, y_poisoned,
@@ -175,9 +375,10 @@ def measure_attack_effectiveness(X_clean, y_clean, X_poisoned, y_poisoned,
     except Exception:
         return True, 0.0, 0.0, 0.0
 
+
 #  INVARIANT ANALYZER
 class InvariantAnalyzer:
-    """v2: 5 invariants, effectiveness filter, primary-detector complementarity."""
+    """v3: 5 invariants with cell-level violation details."""
 
     def __init__(self, alpha=0.05):
         self.alpha = alpha
@@ -211,6 +412,11 @@ class InvariantAnalyzer:
                 "clean_violation_rate": float(
                     (full_stats > np.percentile(bounds, 95)).mean()),
             }
+
+        # Re-run on full data so internal caches reflect the complete dataset
+        for inv in self.invariants:
+            inv.compute_statistic(X, y, y_cont=y_cont)
+
         self._fitted = True
         return self.clean_bounds
 
@@ -285,20 +491,77 @@ class InvariantAnalyzer:
         return results
 
     def compute_row_violations(self, X, y, y_cont=None):
+        """Legacy: returns dict of {invariant_key: bool_array}."""
         assert self._fitted, "Call fit_clean_bounds() first"
 
         results = {}
         for inv in self.invariants:
             stat = inv.compute_statistic(X, y, y_cont=y_cont)
             bound = self.clean_bounds[inv.name]["bound"]
-            # Simple threshold-based violation
             results[inv.short_name.split(":")[0]] = (stat > bound)
         return results
+
+    def compute_row_violation_details(self, X, y, feature_names=None,
+                                       y_cont=None, max_cells=5):
+        assert self._fitted, "Call fit_clean_bounds() first"
+
+        n = len(X)
+        inv_key_map = {
+            inv: inv.short_name.split(":")[0]
+            for inv in self.invariants
+        }
+
+        # Compute stats + violation masks
+        inv_violated = {}
+        for inv in self.invariants:
+            stat = inv.compute_statistic(X, y, y_cont=y_cont)
+            bound = self.clean_bounds[inv.name]["bound"]
+            inv_violated[inv.name] = (stat > bound)
+
+        legacy_violations = []
+        all_details = []
+
+        for i in range(n):
+            row_legacy = []
+            row_details = []
+
+            for inv in self.invariants:
+                if not inv_violated[inv.name][i]:
+                    continue
+
+                key = inv_key_map[inv]
+                row_legacy.append(key)
+
+                try:
+                    cells = inv.explain_row(
+                        i, X, y,
+                        feature_names=feature_names,
+                        y_cont=y_cont,
+                    )
+                except Exception as e:
+                    cells = [{"feature": "?", "col_index": -1,
+                              "value": 0, "detail": f"explain failed: {e}"}]
+
+                score = stat[i] / (bound + 1e-8)
+                row_details.append({
+                    "invariant": key,
+                    "cells": cells[:max_cells],
+                    "score": float(score),
+                })
+
+            if row_details:
+                best = max(row_details, key=lambda x: x["score"])
+                for d in row_details:
+                    d["is_primary"] = (d is best)
+
+            legacy_violations.append(row_legacy)
+            all_details.append(row_details)
+
+        return legacy_violations, all_details
 
     def coverage_analysis(self, datasets, attacks, apply_attack_fn,
                           rates=(0.05, 0.10, 0.20), seeds=3,
                           min_accuracy_drop=0.01, verbose=True):
-        """Effectiveness filter + primary-detector complementarity."""
         all_results = []
         attack_inv_hits = defaultdict(lambda: defaultdict(list))
         per_attack_cov = defaultdict(list)
@@ -322,7 +585,6 @@ class InvariantAnalyzer:
                             if len(pidx) < 3:
                                 continue
 
-                            # Effectiveness filter
                             eff, drop, ca, pa = measure_attack_effectiveness(
                                 X, y, Xp, yp,
                                 min_accuracy_drop=min_accuracy_drop)
@@ -366,7 +628,6 @@ class InvariantAnalyzer:
                     "n_trials": len(inv_dict.get(iname, [])),
                 } for iname in inv_names}
 
-        # Primary-detector complementarity
         primary_counts = defaultdict(lambda: defaultdict(int))
         for r in all_results:
             if r["primary_invariant"]:
@@ -424,7 +685,6 @@ class InvariantAnalyzer:
             ds_stats[ds_name] = {}
             for inv in self.invariants:
                 raw = inv.compute_statistic(X, y, y_cont=y_cont)
-                # Add tiny jitter to break ties (magnitude << data scale)
                 jitter = jitter_rng.uniform(-1e-7, 1e-7, len(raw))
                 ranked = rankdata(raw + jitter).astype(np.float32) / len(raw)
                 ds_stats[ds_name][inv.name] = ranked
@@ -536,7 +796,7 @@ class GaussianMixtureBounds:
         print(f"  I5: Scale z-bound = {z_bound:.2f}")
 
 
-#  SYNTHETIC VALIDATION (7 attacks including dist_shift, repr_inversion)
+#  SYNTHETIC VALIDATION
 def synthetic_validation(n=2000, d=20, delta=3.0, sigma=1.0, k=15,
                          poison_rate=0.10, verbose=True):
     rng = np.random.default_rng(42)
@@ -566,33 +826,28 @@ def synthetic_validation(n=2000, d=20, delta=3.0, sigma=1.0, k=15,
     np_ = int(n * poison_rate)
     attacks = {}
 
-    # 1. Label flip
     Xp, yp = X.copy(), y.copy()
     pidx = rng.choice(n, np_, replace=False)
     yp[pidx] = 1 - yp[pidx]
     attacks["label_flip"] = (Xp, yp, pidx)
 
-    # 2. Feature perturbation
     Xp, yp = X.copy(), y.copy()
     pidx = rng.choice(n, np_, replace=False)
     Xp[pidx] += 4.0 * sigma * rng.choice([-1., 1.], (np_, d))
     attacks["feat_perturb"] = (Xp, yp, pidx)
 
-    # 3. Clean-label
     Xp, yp = X.copy(), y.copy()
     pidx = rng.choice(n, np_, replace=False)
     for i in pidx:
         Xp[i] += 0.7 * ((mu1 if y[i] == 0 else mu0) - X[i])
     attacks["clean_label"] = (Xp, yp, pidx)
 
-    # 4. Backdoor
     Xp, yp = X.copy(), y.copy()
     pidx = rng.choice(n, np_, replace=False)
     Xp[pidx, :3] = 5.0
     yp[pidx] = 1 - yp[pidx]
     attacks["backdoor"] = (Xp, yp, pidx)
 
-    # 5. Boundary flip
     Xp, yp = X.copy(), y.copy()
     bd = np.abs(X[:, 0] - delta / 2)
     cands = np.argsort(bd)[:np_ * 3]
@@ -600,13 +855,11 @@ def synthetic_validation(n=2000, d=20, delta=3.0, sigma=1.0, k=15,
     yp[pidx] = 1 - yp[pidx]
     attacks["boundary_flip"] = (Xp, yp, pidx)
 
-    # 6. Distribution shift (needs I5)
     Xp, yp = X.copy(), y.copy()
     pidx = rng.choice(n, np_, replace=False)
     Xp[pidx] = 2.0 * Xp[pidx]
     attacks["dist_shift"] = (Xp, yp, pidx)
 
-    # 7. Representation inversion
     Xp, yp = X.copy(), y.copy()
     pidx = rng.choice(n, np_, replace=False)
     Xp[pidx] = -Xp[pidx]

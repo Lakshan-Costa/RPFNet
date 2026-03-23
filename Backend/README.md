@@ -72,7 +72,7 @@ For real-time or incremental data pipelines, RPFNet supports row-by-row streamin
 import pandas as pd
 from RPFNet import api
 
-# Existing dataset — used as baseline
+# Existing dataset - used as baseline
 existing = pd.read_csv('dataset.csv')
 api.analyze('stream', existing)
 

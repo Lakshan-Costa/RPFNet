@@ -439,24 +439,12 @@ def _score_dataframe(df: pd.DataFrame, tau_override: float | None = None,
 
         _invariant_analyzer.fit_clean_bounds(X, y)
         # Compute invariant scores per row
-        row_violations_dict = _invariant_analyzer.compute_row_violations(X, y)
+        legacy, details = _invariant_analyzer.compute_row_violation_details(
+            X, y, feature_names=list(Xdf.columns)
+        )
 
-        invariant_violations = []
-        for i in range(len(X)):
-            row = []
-
-            if row_violations_dict["I1"][i]:
-                row.append("I1")
-            if row_violations_dict["I2"][i]:
-                row.append("I2")
-            if row_violations_dict["I3"][i]:
-                row.append("I3")
-            if row_violations_dict["I4"][i]:
-                row.append("I4")
-            if row_violations_dict["I5"][i]:
-                row.append("I5")
-
-            invariant_violations.append(row)
+        invariant_violations = legacy
+        violation_details = details
 
     except Exception as e:
         print(f"[backend] Invariant analysis failed: {e}")
@@ -466,6 +454,7 @@ def _score_dataframe(df: pd.DataFrame, tau_override: float | None = None,
         "scores":           (display_scores * 10).tolist(),
         "flags":            flags,
         "invariant_violations": invariant_violations,
+        "violation_details": violation_details,
         "n_rows":           n,
         "n_flagged":        n_flagged,
         "pct_flagged":      pct_flagged,
