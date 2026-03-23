@@ -440,7 +440,7 @@ def _score_dataframe(df: pd.DataFrame, tau_override: float | None = None,
             extractor = RPFExtractor()
             rpf = extractor.extract(X, y)
 
-        _invariant_analyzer.fit_clean_bounds(X, y)
+        _invariant_analyzer.fit_clean_bounds(X_clean, y_clean)
         # Compute invariant scores per row
         row_violations_dict = _invariant_analyzer.compute_row_violations(X, y)
 
