@@ -423,7 +423,11 @@ def _score_dataframe(df: pd.DataFrame, tau_override: float | None = None,
     # Flag rows
     flags     = (raw_scores >= tau_raw).astype(int).tolist()
     n_flagged = sum(flags)
-    clean_mask = raw_scores < np.percentile(raw_scores, 80)
+    k = int(0.8 * len(raw_scores))
+    clean_idx = np.argsort(raw_scores)[:k]
+
+    clean_mask = np.zeros(len(raw_scores), dtype=bool)
+    clean_mask[clean_idx] = True
 
     X_clean = X[clean_mask]
     y_clean = y[clean_mask]
