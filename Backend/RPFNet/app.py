@@ -423,6 +423,10 @@ def _score_dataframe(df: pd.DataFrame, tau_override: float | None = None,
     # Flag rows
     flags     = (raw_scores >= tau_raw).astype(int).tolist()
     n_flagged = sum(flags)
+    clean_mask = raw_scores < np.percentile(raw_scores, 80)
+
+    X_clean = X[clean_mask]
+    y_clean = y[clean_mask]
     pct_flagged = round(n_flagged / n * 100, 2) if n > 0 else 0.0
 
     invariant_violations = []
