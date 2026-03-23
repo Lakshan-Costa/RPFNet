@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { announceToScreenReader, getStatusAriaLabel } from "./a11y";
+import fetchWithFallback from "./api";
 
 type Row = {
   id?: string;
@@ -23,8 +24,6 @@ type HealthResponse = {
   n_per_dataset_thresholds: number;
   trained_datasets: string[];
 };
-
-const API_BASE = import.meta.env.VITE_API_BASE;
 
 const PRESET_TOPK = [50, 100, 150, 300, 500, 1000, 2000];
 export function clamp01(n: number) { return Math.max(0, Math.min(1, n)); }
@@ -71,7 +70,7 @@ async function analyzeCSV(file: File, tau: number | null, datasetHint: string) {
   if (tau !== null) form.append("tau", String(tau));
   if (datasetHint) form.append("dataset_hint", datasetHint);
 
-  const res = await fetch(`${API_BASE}/analyze_csv`, { method: "POST", body: form });
+  const res = await fetchWithFallback(`/analyze_csv`, { method: "POST", body: form });
   const payload = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(payload?.error || "Analyze CSV failed");
   return payload;
@@ -81,7 +80,7 @@ async function analyzeUCI(uci_id: number, tau: number | null) {
   const body: any = { uci_id };
   if (tau !== null) body.tau = tau;
 
-  const res = await fetch(`${API_BASE}/analyze_uci`, {
+  const res = await fetchWithFallback(`/analyze_uci`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -96,7 +95,7 @@ async function analyzeURL(url: string, tau: number | null, datasetHint: string) 
   if (tau !== null) body.tau = tau;
   if (datasetHint) body.dataset_hint = datasetHint;
 
-  const res = await fetch(`${API_BASE}/analyze_url`, {
+  const res = await fetchWithFallback(`/analyze_url`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -202,7 +201,7 @@ export default function App() {
   useEffect(() => {
     (async () => {
       try {
-        const resHealth = await fetch(`${API_BASE}/health`);
+        const resHealth = await fetchWithFallback(`/health`);
         const h = await resHealth.json();
         setHealth(h);
         // update thresholds state
@@ -317,7 +316,7 @@ async function exportCleanDataset() {
     return;
   }
 
-  const res = await fetch(`${API_BASE}/export_clean`, {
+  const res = await fetchWithFallback(`/export_clean`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
