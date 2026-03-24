@@ -549,8 +549,8 @@ async function exportCleanDataset() {
       id="main-content"
       role="main"
       style={{
-        width: "96vw",
-        minWidth: "90%",
+        width: "100%",
+        maxWidth: "100%",
         margin: 0,
         padding: "20px 24px",
         background: t.bg,
