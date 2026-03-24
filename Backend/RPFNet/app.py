@@ -1,4 +1,3 @@
-#app.py
 """
 Endpoints
 GET  /health
@@ -33,7 +32,6 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 warnings.filterwarnings("ignore")
 from RPFNet.InvariantAnalyzer import InvariantAnalyzer
-# ── Import MetaPoison
 from RPFNet.Attack import apply_attack
 from RPFNet.RPFExtractor import RPFExtractor
 from RPFNet.Dataset import load_builtin, load_csv
@@ -52,7 +50,6 @@ try:
         score_distribution_features,
         RateEstimatorHead,
     )
-    # These are needed for backward-compat model loading (v3 detection.py)
     try:
         from detection import RPFNetPoisonNet, RPF_K_SMALL, RPF_K_LARGE, RPF_CV_FOLDS
     except ImportError:
@@ -67,14 +64,12 @@ except Exception as _e:
     RPFNetPoisonNet = None
     RPF_K_SMALL, RPF_K_LARGE, RPF_CV_FOLDS = 5, 15, 5
 
-# App 
 app = Flask(__name__)
 CORS(app, origins="*")
 
 UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# Global model state
 _lock = threading.Lock()
 _meta:   "RPFNetPoisonDetector"   | None = None
 _hybrid: "HybridEnsembleDetector" | None = None
@@ -92,7 +87,7 @@ def _global_threshold() -> float:
         return float(np.mean(list(DATASET_THRESHOLDS.values())))
     return GLOBAL_THRESHOLD_DEFAULT
 
-_LOADED_RPF_DIM = None   # track actual dim of loaded model
+_LOADED_RPF_DIM = None
 
 def _load_model_compat(meta, path):
     global _LOADED_RPF_DIM
@@ -105,18 +100,14 @@ def _load_model_compat(meta, path):
         if "RPF dim" not in str(e):
             raise
 
-    # Backward-compat: load old-dim model
     print(f"[backend] Dim mismatch detected — loading in backward-compat mode")
     try:
         ckpt = torch.load(path, map_location=meta.device, weights_only=False)
     except TypeError:
-        # Older PyTorch without weights_only param
         ckpt = torch.load(path, map_location=meta.device)
     saved_dim = ckpt.get("rpf_dim", 61)
     print(f"[backend]   saved_dim={saved_dim}  current_dim={RPFExtractor.DIM}")
 
-    # Rebuild net with the SAVED dimension
-    # MetaPoisonNet might not be importable from older detection.py
     _NetClass = RPFNetPoisonNet if RPFNetPoisonNet is not None else type(meta.net)
     meta.net = _NetClass(input_dim=saved_dim).to(meta.device)
     meta.net.load_state_dict(ckpt["net"])
@@ -134,7 +125,6 @@ def _load_model_compat(meta, path):
     meta.net.eval()
     _LOADED_RPF_DIM = saved_dim
 
-    # Monkey-patch _score_rpf to truncate RPF to saved_dim before scoring
     _original_score_rpf = meta._score_rpf
 
     def _patched_score_rpf(rpf):
@@ -252,30 +242,25 @@ def _is_bimodal(scores: np.ndarray) -> bool:
     score_range = float(s[-1] - s[0]) + 1e-10
     signals = 0
 
-    # Gap test — large gap in upper half only
     upper_half = s[n // 2:]
     diffs = np.diff(upper_half)
-    if len(diffs) > 0 and diffs.max() / score_range > 0.15:  # was 0.10
+    if len(diffs) > 0 and diffs.max() / score_range > 0.15:
         signals += 1
 
-    # Kurtosis test
     mu  = s.mean()
     std = s.std() + 1e-10
     kurt = float(np.mean(((s - mu) / std) ** 4)) - 3.0
-    if kurt < -1.0:  # was -0.5
+    if kurt < -1.0:
         signals += 1
 
-    # Tail mass test
-    top_3pct = s[0] + 0.97 * score_range  # was 0.95
+    top_3pct = s[0] + 0.97 * score_range
     tail_mass = float((s >= top_3pct).mean())
-    if tail_mass > 0.20:  # was 0.15 at 5%
+    if tail_mass > 0.20:
         signals += 1
 
-    # Histogram valley test
     try:
         n_bins = min(50, max(10, n // 100))
         counts, edges = np.histogram(s, bins=n_bins)
-        # Look for a valley: bin that is <30% of max, with higher bins on both sides
         max_count = counts.max()
         for i in range(2, len(counts) - 2):
             if (counts[i] < 0.30 * max_count
@@ -286,7 +271,6 @@ def _is_bimodal(scores: np.ndarray) -> bool:
     except Exception:
         pass
 
-    # Require 2+ signals for bimodal classification
     return signals >= 2
 
 def _compute_tau_local(scores: np.ndarray) -> float:
@@ -294,7 +278,6 @@ def _compute_tau_local(scores: np.ndarray) -> float:
         return float(np.percentile(scores, 95))
 
     if _is_bimodal(scores):
-        # ── Otsu: find threshold that maximises between-class variance ──
         s = np.sort(scores)
         n = len(s)
         best_thresh = float(s[-1])
@@ -314,11 +297,9 @@ def _compute_tau_local(scores: np.ndarray) -> float:
                 best_thresh = float(t)
         return best_thresh
     else:
-        # ── Unimodal: extremely conservative — median + 4 * MAD ──
-        # On a clean dataset, this should flag ~0.5-2%
         median_s = float(np.median(scores))
         mad_s    = float(np.median(np.abs(scores - median_s))) * 1.4826 + 1e-10
-        return median_s + 4.0 * mad_s  # was 3.5
+        return median_s + 4.0 * mad_s
 
 def _estimate_contamination_rate_safe(scores: np.ndarray, scoring_mode: str = "isolation_forest") -> float:
 
@@ -326,32 +307,19 @@ def _estimate_contamination_rate_safe(scores: np.ndarray, scoring_mode: str = "i
     if n < 30:
         return 0.01
 
-    # Compute conservative baseline
     median_s = float(np.median(scores))
     mad_s    = float(np.median(np.abs(scores - median_s))) * 1.4826 + 1e-10
     mad_rate = float((scores > median_s + 4.0 * mad_s).mean())
     mad_rate = np.clip(mad_rate, 0.0, 0.05)
 
-    # Check bimodality
     bimodal = _is_bimodal(scores)
 
     if not bimodal:
-        # If distribution is very tight
-        if scores.std() < 1e-3:
-            return 0.0
-
-        # If MAD rate is extremely small
-        if mad_rate < 0.005:
-            return 0.0
-
         return float(mad_rate)
 
-    # Otsu estimate
     tau_otsu  = _compute_tau_local(scores)
     otsu_rate = float((scores > tau_otsu).mean())
 
-    # Measure separation strength
-    # Compare cluster means to judge if split is meaningful
     below = scores[scores <= tau_otsu]
     above = scores[scores > tau_otsu]
 
@@ -360,17 +328,13 @@ def _estimate_contamination_rate_safe(scores: np.ndarray, scoring_mode: str = "i
 
     separation = abs(below.mean() - above.mean()) / (scores.std() + 1e-8)
 
-    # Decision logic
     if separation < 0.5:
-        # Weak separation → likely natural structure
         return float(mad_rate)
 
     if separation < 1.0:
-        # Moderate separation → blend
         blended = 0.5 * mad_rate + 0.5 * otsu_rate
         return float(np.clip(blended, 0.01, 0.20))
 
-    # Strong separation → trust Otsu
     return float(np.clip(otsu_rate, 0.01, 0.40))
 
 def _score_dataframe(df: pd.DataFrame, tau_override: float | None = None,
@@ -431,8 +395,8 @@ def _score_dataframe(df: pd.DataFrame, tau_override: float | None = None,
     tau_local_raw = _compute_tau_local(raw_scores)
 
     if tau_override is not None:
-        tau_display = float(tau_override)
-        tau_raw = s_min + tau_display * s_range
+        tau_display  = float(tau_override)
+        tau_raw      = s_min + tau_display * s_range
         threshold_source = "user_override"
 
     elif dataset_hint and dataset_hint in DATASET_THRESHOLDS:
@@ -459,12 +423,11 @@ def _score_dataframe(df: pd.DataFrame, tau_override: float | None = None,
 
     tau_local_display = float((tau_local_raw - s_min) / s_range)
 
-    # Store threshold
     ds_key = dataset_hint or f"ds_{uuid.uuid4().hex[:8]}"
     DATASET_THRESHOLDS[ds_key] = tau_raw
 
-    invariant_violations = [[] for _ in range(n)]
-    violation_details = [[] for _ in range(n)]
+    invariant_violations = []
+    violation_details = []
 
     try:
         if _loaded and _meta is not None:
@@ -474,7 +437,6 @@ def _score_dataframe(df: pd.DataFrame, tau_override: float | None = None,
             rpf = extractor.extract(X, y)
 
         _invariant_analyzer.fit_clean_bounds(X, y)
-
         legacy, details = _invariant_analyzer.compute_row_violation_details(
             X, y, feature_names=list(Xdf.columns)
         )
@@ -484,22 +446,37 @@ def _score_dataframe(df: pd.DataFrame, tau_override: float | None = None,
 
     except Exception as e:
         print(f"[backend] Invariant analysis failed: {e}")
-        # already safely initialized above
+        invariant_violations = [[] for _ in range(len(X))]
+        violation_details = [[] for _ in range(len(X))]
 
-    flags = []
+    bimodal = _is_bimodal(raw_scores)
 
-    for i in range(n):
-        score_flag = raw_scores[i] >= tau_raw if np.isfinite(tau_raw) else False
+    clean_distribution = False
+    if not bimodal and n >= 30:
+        mu = raw_scores.mean()
+        std = raw_scores.std() + 1e-10
+        skewness = float(np.mean(((raw_scores - mu) / std) ** 3))
+        p95 = float(np.percentile(raw_scores, 95))
+        tail_ratio = (s_max - p95) / s_range
+        cv = std / (abs(mu) + 1e-10)
+        if skewness <= 2.0 and (tail_ratio < 0.15 or (cv < 0.3 and skewness < 1.0)):
+            clean_distribution = True
 
-        has_violation = (
-            len(violation_details[i]) > 0
-            if i < len(violation_details)
-            else False
-        )
-
-        # 🔥 KEY LOGIC
-        flag = int(score_flag and has_violation)
-        flags.append(flag)
+    if tau_override is not None:
+        flags = (raw_scores >= tau_raw).astype(int).tolist()
+    elif clean_distribution:
+        flags = []
+        for i in range(n):
+            has_violation = bool(invariant_violations and len(invariant_violations[i]) > 0)
+            score_above = raw_scores[i] >= tau_raw
+            flags.append(int(score_above and has_violation))
+        threshold_source = "auto_suppressed:clean_distribution"
+    else:
+        flags = []
+        for i in range(n):
+            has_violation = bool(invariant_violations and len(invariant_violations[i]) > 0)
+            score_above = raw_scores[i] >= tau_raw
+            flags.append(int(score_above and has_violation))
 
     n_flagged = sum(flags)
     pct_flagged = round(n_flagged / n * 100, 2) if n > 0 else 0.0
@@ -516,8 +493,9 @@ def _score_dataframe(df: pd.DataFrame, tau_override: float | None = None,
         "tau_local": round(tau_local_display * 10, 2),
         "global_threshold": round(_global_threshold(), 4),
         "threshold_source": threshold_source,
-        "mode": mode,
-        "bimodal": _is_bimodal(raw_scores),
+        "mode":             mode,
+        "bimodal":          bimodal,
+        "clean_distribution": clean_distribution,
         "score_stats": {
             "min": round(float(display_scores.min()), 4),
             "p25": round(float(np.percentile(display_scores, 25)), 4),
@@ -528,7 +506,6 @@ def _score_dataframe(df: pd.DataFrame, tau_override: float | None = None,
         },
     }
 
-#  Routes
 @app.route("/health")
 def health():
     return jsonify({
@@ -698,24 +675,20 @@ def analyze_stream():
     session = STREAM_SESSIONS[stream_id]
     session["buffer"].append(sample)
 
-    # keep sliding window
     if len(session["buffer"]) > session["window_size"]:
         session["buffer"].pop(0)
 
     X = np.array(session["buffer"], dtype=np.float32)
 
-    # need enough samples first
     if len(X) < 20:
         return jsonify({
             "status": "warming_up",
             "n_samples": len(X)
         })
 
-    # scale
     scaler = session["scaler"]
     X_scaled = scaler.fit_transform(X)
 
-    # Train model only once during warmup
     if not session["initialized"]:
         iso = IsolationForest(n_estimators=200, random_state=42)
         iso.fit(X_scaled)
@@ -723,7 +696,6 @@ def analyze_stream():
         session["model"] = iso
         session["initialized"] = True
 
-    # Use trained model for scoring
     iso = session["model"]
 
     scores = -iso.score_samples(X_scaled)
