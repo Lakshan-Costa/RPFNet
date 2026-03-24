@@ -278,9 +278,9 @@ export default function App() {
           marginBottom: 4,
           transition: "all 0.15s ease",
           maxWidth: expanded ? 340 : 420,
-          whiteSpace: "nowrap",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
+          whiteSpace: expanded ? "normal" : "nowrap",
+          overflow: expanded ? "visible" : "hidden",
+          textOverflow: expanded ? "clip" : "ellipsis",
         }}
         title={`Click to ${expanded ? "collapse" : "expand"} details for feature "${cell.feature}"`}
         aria-expanded={expanded}
@@ -316,6 +316,9 @@ export default function App() {
             fontSize: 11,
             lineHeight: 1.5,
             color: themeColors.subtext,
+            whiteSpace: "normal",
+            overflow: "visible",
+            textOverflow: "clip",
           }}>
             {cell.expected_range && (
               <span style={{ display: "block" }}>
