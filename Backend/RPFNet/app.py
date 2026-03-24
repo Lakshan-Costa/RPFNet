@@ -310,7 +310,7 @@ def _estimate_contamination_rate_safe(scores: np.ndarray, scoring_mode: str = "i
     median_s = float(np.median(scores))
     mad_s    = float(np.median(np.abs(scores - median_s))) * 1.4826 + 1e-10
     mad_rate = float((scores > median_s + 4.0 * mad_s).mean())
-    mad_rate = np.clip(mad_rate, 0.0, 0.05)
+    mad_rate = np.clip(mad_rate, 0.003, 0.05)
 
     bimodal = _is_bimodal(scores)
 
@@ -338,17 +338,17 @@ def _estimate_contamination_rate_safe(scores: np.ndarray, scoring_mode: str = "i
     return float(np.clip(otsu_rate, 0.01, 0.40))
 
 def _score_dataframe(df: pd.DataFrame, tau_override: float | None = None,
-                dataset_hint: str = "") -> dict:
-
+                      dataset_hint: str = "", quick: bool = False) -> dict:
     DATASET_THRESHOLDS.clear()
-
     X, y, sc, Xdf = _prepare(df)
     n = len(X)
 
-    raw_scores = None
-    mode = "fallback"
+    QUICK_CANDIDATE_LIMIT = 500
 
-    if _loaded and _hybrid is not None:
+    raw_scores = None
+    mode       = "fallback"
+
+    if not quick and _loaded and _hybrid is not None:
         try:
             combined, meta_s, iso_s = _hybrid.score(X, y)
             raw_scores = np.asarray(combined, dtype=np.float64)
@@ -357,39 +357,16 @@ def _score_dataframe(df: pd.DataFrame, tau_override: float | None = None,
             print(f"[backend] Hybrid scoring failed ({exc}), falling back")
 
     if raw_scores is None:
-        iso = IsolationForest(
-            n_estimators=200,
-            contamination="auto",
-            random_state=42,
-            n_jobs=-1
-        )
+        n_trees = 50 if quick else 200
+        iso = IsolationForest(n_estimators=n_trees, contamination="auto",
+                               random_state=42, n_jobs=-1)
         raw_scores = -iso.fit(X).score_samples(X)
         raw_scores = np.asarray(raw_scores, dtype=np.float64)
-        mode = "isolation_forest"
+        mode = "isolation_forest_quick" if quick else "isolation_forest"
 
-    if raw_scores.std() < 1e-4:
-        return {
-            "scores": ((raw_scores - raw_scores.min()) /
-                       (raw_scores.ptp() + 1e-10) * 10).tolist(),
-            "flags": [0] * n,
-            "invariant_violations": [[] for _ in range(n)],
-            "violation_details": [[] for _ in range(n)],
-            "n_rows": n,
-            "n_flagged": 0,
-            "pct_flagged": 0.0,
-            "tau": 0,
-            "tau_local": 0,
-            "global_threshold": _global_threshold(),
-            "threshold_source": "clean_detected",
-            "mode": mode,
-            "bimodal": False,
-            "score_stats": {}
-        }
-
-    s_min = float(raw_scores.min())
-    s_max = float(raw_scores.max())
+    s_min   = float(raw_scores.min())
+    s_max   = float(raw_scores.max())
     s_range = s_max - s_min + 1e-10
-
     display_scores = ((raw_scores - s_min) / s_range).astype(np.float64)
 
     tau_local_raw = _compute_tau_local(raw_scores)
@@ -398,27 +375,15 @@ def _score_dataframe(df: pd.DataFrame, tau_override: float | None = None,
         tau_display  = float(tau_override)
         tau_raw      = s_min + tau_display * s_range
         threshold_source = "user_override"
-
     elif dataset_hint and dataset_hint in DATASET_THRESHOLDS:
-        tau_raw = DATASET_THRESHOLDS[dataset_hint]
+        tau_raw     = DATASET_THRESHOLDS[dataset_hint]
         tau_display = float((tau_raw - s_min) / s_range)
         threshold_source = f"per_dataset:{dataset_hint}"
-
     else:
-        est_rate = _estimate_contamination_rate_safe(
-            raw_scores, scoring_mode=mode
-        )
-
-        if est_rate <= 0.0:
-            tau_raw = float("inf")
-        else:
-            tau_raw = float(
-                np.percentile(raw_scores, (1.0 - est_rate) * 100)
-            )
-
-        tau_display = float((tau_raw - s_min) / s_range) \
-            if np.isfinite(tau_raw) else 1.0
-
+        est_rate    = _estimate_contamination_rate_safe(raw_scores,
+                                                        scoring_mode=mode)
+        tau_raw     = float(np.percentile(raw_scores, (1.0 - est_rate) * 100))
+        tau_display = float((tau_raw - s_min) / s_range)
         threshold_source = "auto_estimated"
 
     tau_local_display = float((tau_local_raw - s_min) / s_range)
@@ -426,28 +391,39 @@ def _score_dataframe(df: pd.DataFrame, tau_override: float | None = None,
     ds_key = dataset_hint or f"ds_{uuid.uuid4().hex[:8]}"
     DATASET_THRESHOLDS[ds_key] = tau_raw
 
-    invariant_violations = []
-    violation_details = []
+    invariant_violations = [[] for _ in range(n)]
+    violation_details = [[] for _ in range(n)]
 
     try:
-        if _loaded and _meta is not None:
-            rpf = _meta.extractor.extract(X, y)
+        if quick:
+            candidate_idx = np.argsort(raw_scores)[-QUICK_CANDIDATE_LIMIT:]
+            X_cand = X[candidate_idx]
+            y_cand = y[candidate_idx]
+            _invariant_analyzer.fit_clean_bounds(X, y)
+            legacy_cand, details_cand = _invariant_analyzer.compute_row_violation_details(
+                X_cand, y_cand, feature_names=list(Xdf.columns)
+            )
+            for j, orig_i in enumerate(candidate_idx):
+                invariant_violations[orig_i] = legacy_cand[j]
+                violation_details[orig_i] = details_cand[j]
         else:
-            extractor = RPFExtractor()
-            rpf = extractor.extract(X, y)
+            if _loaded and _meta is not None:
+                rpf = _meta.extractor.extract(X, y)
+            else:
+                extractor = RPFExtractor()
+                rpf = extractor.extract(X, y)
 
-        _invariant_analyzer.fit_clean_bounds(X, y)
-        legacy, details = _invariant_analyzer.compute_row_violation_details(
-            X, y, feature_names=list(Xdf.columns)
-        )
-
-        invariant_violations = legacy
-        violation_details = details
+            _invariant_analyzer.fit_clean_bounds(X, y)
+            legacy, details = _invariant_analyzer.compute_row_violation_details(
+                X, y, feature_names=list(Xdf.columns)
+            )
+            invariant_violations = legacy
+            violation_details = details
 
     except Exception as e:
         print(f"[backend] Invariant analysis failed: {e}")
-        invariant_violations = [[] for _ in range(len(X))]
-        violation_details = [[] for _ in range(len(X))]
+        invariant_violations = [[] for _ in range(n)]
+        violation_details = [[] for _ in range(n)]
 
     bimodal = _is_bimodal(raw_scores)
 
@@ -482,27 +458,28 @@ def _score_dataframe(df: pd.DataFrame, tau_override: float | None = None,
     pct_flagged = round(n_flagged / n * 100, 2) if n > 0 else 0.0
 
     return {
-        "scores": (display_scores * 10).tolist(),
-        "flags": flags,
+        "scores":           (display_scores * 10).tolist(),
+        "flags":            flags,
         "invariant_violations": invariant_violations,
         "violation_details": violation_details,
-        "n_rows": n,
-        "n_flagged": n_flagged,
-        "pct_flagged": pct_flagged,
-        "tau": round(tau_display * 10, 2),
-        "tau_local": round(tau_local_display * 10, 2),
+        "n_rows":           n,
+        "n_flagged":        n_flagged,
+        "pct_flagged":      pct_flagged,
+        "tau":              round(tau_display * 10, 2),
+        "tau_local":        round(tau_local_display * 10, 2),
         "global_threshold": round(_global_threshold(), 4),
         "threshold_source": threshold_source,
         "mode":             mode,
         "bimodal":          bimodal,
         "clean_distribution": clean_distribution,
+        "quick":              quick,
         "score_stats": {
-            "min": round(float(display_scores.min()), 4),
-            "p25": round(float(np.percentile(display_scores, 25)), 4),
-            "p50": round(float(np.median(display_scores)), 4),
-            "p75": round(float(np.percentile(display_scores, 75)), 4),
-            "p95": round(float(np.percentile(display_scores, 95)), 4),
-            "max": round(float(display_scores.max()), 4),
+            "min":  round(float(display_scores.min()), 4),
+            "p25":  round(float(np.percentile(display_scores, 25)), 4),
+            "p50":  round(float(np.median(display_scores)), 4),
+            "p75":  round(float(np.percentile(display_scores, 75)), 4),
+            "p95":  round(float(np.percentile(display_scores, 95)), 4),
+            "max":  round(float(display_scores.max()), 4),
         },
     }
 
@@ -561,6 +538,7 @@ def analyze_csv():
 
     tau_str      = request.form.get("tau", "").strip()
     dataset_hint = request.form.get("dataset_hint", "").strip()
+    quick        = request.form.get("quick", "").strip().lower() in ("1", "true", "yes")
     tau_override = float(tau_str) / 10.0 if tau_str else None
 
     try:
@@ -572,7 +550,7 @@ def analyze_csv():
         return jsonify({"error": "Dataset has fewer than 5 rows"}), 400
 
     try:
-        result = _score_dataframe(df, tau_override, dataset_hint)
+        result = _score_dataframe(df, tau_override, dataset_hint, quick=quick)
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
 
@@ -592,6 +570,7 @@ def analyze_uci():
         return jsonify({"error": "uci_id is required"}), 400
 
     tau_override = float(body["tau"]) if "tau" in body else None
+    quick = bool(body.get("quick", False))
 
     try:
         from ucimlrepo import fetch_ucirepo
@@ -609,7 +588,7 @@ def analyze_uci():
         return jsonify({"error": "Dataset has fewer than 5 rows"}), 400
 
     try:
-        result = _score_dataframe(df, tau_override, dataset_hint=f"uci_{uci_id}")
+        result = _score_dataframe(df, tau_override, dataset_hint=f"uci_{uci_id}", quick=quick)
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
 
@@ -634,6 +613,7 @@ def analyze_url():
 
     tau_override = float(body["tau"]) if "tau" in body else None
     dataset_hint = str(body.get("dataset_hint", "")).strip()
+    quick = bool(body.get("quick", False))
 
     try:
         resp = _requests.get(url, timeout=30, stream=True)
@@ -651,7 +631,7 @@ def analyze_url():
         return jsonify({"error": "Dataset has fewer than 5 rows"}), 400
 
     try:
-        result = _score_dataframe(df, tau_override, dataset_hint)
+        result = _score_dataframe(df, tau_override, dataset_hint, quick=quick)
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
 
