@@ -183,7 +183,6 @@ export default function App() {
   const [interactiveTau, setInteractiveTau] = useState<number>(3.5);
   const [topK, setTopK] = useState<number>(150);
   const [datasetId, setDatasetId] = useState<string | null>(null);
-  const [cleanDistribution, setCleanDistribution] = useState<boolean>(false);
 
   const scores = useMemo(() => rows.map((r) => r.score), [rows]);
   const distribution = useMemo(() => {
@@ -262,7 +261,6 @@ export default function App() {
     setInteractiveTau(res.tau);
     setTauLocal(res.tau_local ?? null);
     setTopK(prev => Math.min(prev, newRows.length));
-    setCleanDistribution(res.clean_distribution || false);
   }
 
   function CellChip({ cell, themeColors }: { cell: CellViolation; themeColors: typeof t }) {
