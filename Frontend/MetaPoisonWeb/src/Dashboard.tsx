@@ -264,7 +264,9 @@ export default function App() {
         onClick={() => setExpanded(!expanded)}
         style={{
           display: "inline-flex",
-          flexDirection: "column",
+          flexDirection: expanded ? "column" : "row",
+          alignItems: expanded ? "flex-start" : "center",
+          gap: expanded ? 4 : 8,
           cursor: "pointer",
           background: theme === "dark" ? "rgba(255,107,107,0.12)" : "rgba(220,50,50,0.08)",
           border: `1px solid ${theme === "dark" ? "rgba(255,107,107,0.3)" : "rgba(220,50,50,0.2)"}`,
@@ -275,7 +277,10 @@ export default function App() {
           marginRight: 4,
           marginBottom: 4,
           transition: "all 0.15s ease",
-          maxWidth: expanded ? 340 : 200,
+          maxWidth: expanded ? 340 : 420,
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
         }}
         title={`Click to ${expanded ? "collapse" : "expand"} details for feature "${cell.feature}"`}
         aria-expanded={expanded}
@@ -343,8 +348,6 @@ export default function App() {
     );
   }
 
-  /* ── Format Reasons (with cell-level detail) ─────────────── */
-
   function formatReasons(row: Row, isFlagged?: boolean) {
     const details = row.violation_details;
     const reasons = row.reasons;
@@ -371,9 +374,9 @@ export default function App() {
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           {details!.map((vd, idx) => (
             <div key={idx}>
-              <span style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 2 }}>
-                <strong style={{ fontSize: 12 }}>{vd.is_primary ? "Primary Violated Invariant - " : "Other Violated Invariants - "}{vd.invariant}</strong>
-                <strong style={{ fontSize: 12}}>
+              <span style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                <strong style={{ fontSize: 12, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{vd.is_primary ? "Primary Violated Invariant - " : "Other Violated Invariants - "}{vd.invariant}</strong>
+                <strong style={{ fontSize: 12, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {INVARIANT_INFO[vd.invariant]?.name ?? "Unknown"}
                 </strong>
                 <InfoTooltip text={INVARIANT_INFO[vd.invariant]?.desc || ""} />
@@ -400,8 +403,8 @@ export default function App() {
     return (
       <>
         {reasons!.map((r, idx) => (
-          <span key={idx} style={{ marginRight: 8 }}>
-            <strong>{r}</strong>: {INVARIANT_INFO[r]?.name}
+          <span key={idx} style={{ marginRight: 8, display: "inline-block", maxWidth: "100%", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            <strong style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r}</strong>: {INVARIANT_INFO[r]?.name}
             <InfoTooltip text={INVARIANT_INFO[r]?.desc || ""} />
           </span>
         ))}
@@ -549,8 +552,8 @@ async function exportCleanDataset() {
       id="main-content"
       role="main"
       style={{
-        width: "100%",
-        maxWidth: "100%",
+        width: "96vw",
+        minWidth: "90%",
         margin: 0,
         padding: "20px 24px",
         background: t.bg,
@@ -1013,7 +1016,7 @@ async function exportCleanDataset() {
             <div className={theme === "dark" ? "dark-scroll" : "light-scroll"}
               style={{ overflow: "auto", maxHeight: 460 }}>
               <table 
-                style={{ width: "100%", borderCollapse: "collapse", fontSize: 16 }}
+                style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, tableLayout: "fixed" }}
                 role="table"
                 aria-label="Most suspicious rows by anomaly score"
               >
@@ -1022,7 +1025,7 @@ async function exportCleanDataset() {
                     <th scope="col" style={{ padding: "8px 6px", fontWeight: 700 }}>Row ID</th>
                     <th scope="col" style={{ padding: "8px 6px", fontWeight: 700 }}>Anomaly Score</th>
                     <th scope="col" style={{ padding: "8px 6px", fontWeight: 700 }}>Status</th>
-                    <th scope="col" style={{ padding: "8px 6px", fontWeight: 700, minWidth: 280 }}>
+                    <th scope="col" style={{ padding: "8px 6px", fontWeight: 700, minWidth: 280, width: "45%", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                       Violated Invariants & Cells
                     </th>
                   </tr>
@@ -1049,9 +1052,9 @@ async function exportCleanDataset() {
                             {r.score >= interactiveTau ? "🚩 FLAGGED" : "✓ Clean"}
                           </span>
                         </td>
-                        <td style={{ padding: "8px 6px" }}>
+                        <td style={{ padding: "8px 6px", maxWidth: 780, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                           {r.score >= interactiveTau ? (
-                            <span>
+                            <span style={{ display: "inline-block", width: "100%", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                               {formatReasons(r, r.score >= interactiveTau)}
                             </span>
                           ) : (
