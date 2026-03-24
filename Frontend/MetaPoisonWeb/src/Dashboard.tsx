@@ -47,6 +47,15 @@ type HealthResponse = {
 const PRESET_TOPK = [50, 100, 150, 300, 500, 1000, 2000];
 export function clamp01(n: number) { return Math.max(0, Math.min(1, n)); }
 
+function rowHasViolations(r: Row): boolean {
+  return (r.reasons != null && r.reasons.length > 0) ||
+         (r.violation_details != null && r.violation_details.length > 0);
+}
+
+function isRowFlagged(r: Row, tau: number): boolean {
+  return r.score >= tau && rowHasViolations(r);
+}
+
 export function computeMetrics(rows: Row[], thr: number): Metrics | null {
   const labeled = rows.some((r) => r.y_true === 0 || r.y_true === 1);
   if (!labeled) return null;
@@ -54,7 +63,7 @@ export function computeMetrics(rows: Row[], thr: number): Metrics | null {
   let TP = 0, FP = 0, TN = 0, FN = 0;
   for (const r of rows) {
     if (r.y_true !== 0 && r.y_true !== 1) continue;
-    const pred = r.score >= thr ? 1 : 0;
+    const pred = isRowFlagged(r, thr) ? 1 : 0;
     if (pred === 1 && r.y_true === 1) TP++;
     if (pred === 1 && r.y_true === 0) FP++;
     if (pred === 0 && r.y_true === 0) TN++;
@@ -174,6 +183,7 @@ export default function App() {
   const [interactiveTau, setInteractiveTau] = useState<number>(3.5);
   const [topK, setTopK] = useState<number>(150);
   const [datasetId, setDatasetId] = useState<string | null>(null);
+  const [cleanDistribution, setCleanDistribution] = useState<boolean>(false);
 
   const scores = useMemo(() => rows.map((r) => r.score), [rows]);
   const distribution = useMemo(() => {
@@ -186,7 +196,7 @@ export default function App() {
     };
   }, [scores]);
 
-  const flagged = useMemo(() => rows.filter((r) => r.score >= interactiveTau), [rows, interactiveTau]);
+  const flagged = useMemo(() => rows.filter((r) => isRowFlagged(r, interactiveTau)), [rows, interactiveTau]);
   const metrics = useMemo(() => computeMetrics(rows, interactiveTau), [rows, interactiveTau]);
 
   const THEOREM_EXPLANATION = `
@@ -252,9 +262,8 @@ export default function App() {
     setInteractiveTau(res.tau);
     setTauLocal(res.tau_local ?? null);
     setTopK(prev => Math.min(prev, newRows.length));
+    setCleanDistribution(res.clean_distribution || false);
   }
-
-  /* ── Cell Violation Chip ──────────────────────────────────── */
 
   function CellChip({ cell, themeColors }: { cell: CellViolation; themeColors: typeof t }) {
     const [expanded, setExpanded] = useState(false);
@@ -355,7 +364,6 @@ export default function App() {
     const details = row.violation_details;
     const reasons = row.reasons;
 
-    // No violations at all
     const hasDetails = details && details.length > 0;
     const hasReasons = reasons && reasons.length > 0;
 
@@ -371,7 +379,6 @@ export default function App() {
       return "";
     }
 
-    // If we have rich violation_details with cell info, render those
     if (hasDetails) {
       return (
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -402,7 +409,6 @@ export default function App() {
       );
     }
 
-    // Fallback: legacy string[] reasons
     return (
       <>
         {reasons!.map((r, idx) => (
@@ -468,7 +474,7 @@ async function exportCleanDataset() {
   }
 
   const cleanIds = rows
-    .filter(r => r.score < interactiveTau && r.flagged !== 1)
+    .filter(r => !isRowFlagged(r, interactiveTau))
     .map(r => Number(r.id));
 
   if (cleanIds.length === 0) {
@@ -565,7 +571,6 @@ async function exportCleanDataset() {
         overflowX: "hidden",
       }}
     >
-      {/* Accessibility: ARIA live region for announcements */}
       <div
         id="aria-live-region"
         aria-live="polite"
@@ -794,7 +799,7 @@ async function exportCleanDataset() {
               </div>
 
               <div style={{background: t.card, padding: 14, borderRadius: 8, textAlign: "left"}}>
-                <div style={{ fontSize: 14, opacity: 0.7 }}>Flagged (score ≥ τ)</div>
+                <div style={{ fontSize: 14, opacity: 0.7 }}>Flagged (score ≥ τ + violation)</div>
                 <div style={{ fontSize: 26, fontWeight: 700 }}>{flagged.length.toLocaleString()}</div>
                 <div style={{ fontSize: 14, opacity: 0.7 }}>τ = {formatNum(interactiveTau, 2)}</div>
               </div>
@@ -842,10 +847,6 @@ async function exportCleanDataset() {
             </section>
           </div>
 
-          
-
-
-          {/*Right side*/}
           <div className="card">
             <div style={{ background: t.card, padding: 14, borderRadius: 8, marginTop: 12 }}>
                 <h3 style={{ marginTop: 0 }}>Thresholds</h3>
@@ -862,8 +863,8 @@ async function exportCleanDataset() {
               <section style={{marginTop: 14, background: t.card, padding: 14, borderRadius: 8}}>
                 <h2 style={{ marginTop: 0, color: t.text, fontSize: "1.4em" }}>Interactive Threshold Tuning</h2>
                 <p style={{ fontSize: 13, opacity: 0.75, margin: "0 0 16px 0" }}>
-                  Adjust the detection threshold to see real-time impact on flagged rows and metrics. 
-                  A higher threshold results in fewer flagged rows but higher precision.
+                  Adjust the detection threshold to see real-time impact on flagged rows and metrics.
+                  Rows must also violate at least one invariant to be flagged.
                 </p>
                 <div style={{display: "grid", gridTemplateColumns: "1fr auto", gap: 20, alignItems: "center"}}>
                   <div>
@@ -937,7 +938,7 @@ async function exportCleanDataset() {
                 <h2 style={{ marginTop: 0, color: t.text, fontSize: "1.4em" }}>Flagged Rows Visualization</h2>
                 <div style={{ fontSize: 14, opacity: 0.8, marginBottom: 8 }}>
                   Each point represents a row. The horizontal dashed line shows the current threshold. 
-                  Larger, brighter points indicate flagged (suspicious) rows above the threshold.
+                  Larger, brighter points indicate flagged (suspicious) rows that are above the threshold and violate at least one invariant.
                 </div>
                 <ScoreScatter rows={rows} tau={interactiveTau} height={480} theme={t} />
               </div>
@@ -1037,35 +1038,42 @@ async function exportCleanDataset() {
                   {[...rows]
                     .sort((a, b) => b.score - a.score)
                     .slice(0, topK)
-                    .map((r, i) => (
-                      <tr key={i} style={{ borderBottom: `1px solid ${theme === "dark" ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)"}`, verticalAlign: "top" }}>
-                        <td style={{ padding: "8px 6px" }}>{r.id ?? `row_${i}`}</td>
-                        <td style={{ padding: "8px 6px", fontFamily: "monospace" }}>{formatNum(r.score, 4)}</td>
-                        <td style={{ padding: "8px 6px" }}>
-                          <span
-                            style={{
-                              padding: "4px 8px",
-                              borderRadius: 999,
-                              border: `1px solid ${t.border}`,
-                              opacity: r.score >= interactiveTau ? 1 : 0.6,
-                              backgroundColor: r.score >= interactiveTau ? "rgba(255,107,107,0.2)" : "rgba(78,205,196,0.2)",
-                            }}
-                            aria-label={r.score >= interactiveTau ? "Flagged as suspicious" : "Clean, below threshold"}
-                          >
-                            {r.score >= interactiveTau ? "🚩 FLAGGED" : "✓ Clean"}
-                          </span>
-                        </td>
-                        <td style={{ padding: "8px 6px", maxWidth: 780, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                          {r.score >= interactiveTau ? (
-                            <span style={{ display: "inline-block", width: "100%", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                              {formatReasons(r, r.score >= interactiveTau)}
+                    .map((r, i) => {
+                      const rowIsFlagged = isRowFlagged(r, interactiveTau);
+                      return (
+                        <tr key={i} style={{ borderBottom: `1px solid ${theme === "dark" ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)"}`, verticalAlign: "top" }}>
+                          <td style={{ padding: "8px 6px" }}>{r.id ?? `row_${i}`}</td>
+                          <td style={{ padding: "8px 6px", fontFamily: "monospace" }}>{formatNum(r.score, 4)}</td>
+                          <td style={{ padding: "8px 6px" }}>
+                            <span
+                              style={{
+                                padding: "4px 8px",
+                                borderRadius: 999,
+                                border: `1px solid ${t.border}`,
+                                opacity: rowIsFlagged ? 1 : 0.6,
+                                backgroundColor: rowIsFlagged ? "rgba(255,107,107,0.2)" : "rgba(78,205,196,0.2)",
+                              }}
+                              aria-label={rowIsFlagged ? "Flagged as suspicious" : "Clean, below threshold or no invariant violation"}
+                            >
+                              {rowIsFlagged ? "🚩 FLAGGED" : "✓ Clean"}
                             </span>
-                          ) : (
-                            ""
-                          )}
-                        </td>
-                      </tr>
-                    ))}
+                          </td>
+                          <td style={{ padding: "8px 6px", maxWidth: 780, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                            {rowIsFlagged ? (
+                              <span style={{ display: "inline-block", width: "100%", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                                {formatReasons(r, rowIsFlagged)}
+                              </span>
+                            ) : (
+                              r.score >= interactiveTau && !rowHasViolations(r) ? (
+                                <span style={{ fontSize: 11, opacity: 0.6, fontStyle: "italic" }}>
+                                  High score but no invariant violation — not flagged
+                                </span>
+                              ) : ""
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
                 </tbody>
               </table>
             </div>
@@ -1122,7 +1130,7 @@ function ScoreScatter({ rows, tau, height = 260, theme }: { rows: Row[]; tau: nu
     const sampled: { x: number; y: number; flagged: boolean }[] = [];
     for (let i = 0; i < N; i += step) {
       const r = rows[i];
-      sampled.push({ x: i, y: r.score, flagged: r.score >= tau });
+      sampled.push({ x: i, y: r.score, flagged: isRowFlagged(r, tau) });
     }
 
     const ys = sampled.map((p) => p.y).sort((a, b) => a - b);
@@ -1200,7 +1208,7 @@ function ScoreScatter({ rows, tau, height = 260, theme }: { rows: Row[]; tau: nu
       <canvas ref={canvasRef} role="img" aria-label="Scatter plot showing anomaly scores by row index. Larger brighter points are flagged as suspicious." />
       <div style={{ fontSize: 14, opacity: 0.75, marginTop: 6, padding: "8px 12px", backgroundColor: theme === themes.dark ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.05)", borderRadius: "4px" }}>
         <strong>How to read this chart:</strong> X-axis shows row index, Y-axis shows anomaly score. 
-        The horizontal dashed line represents the current threshold (τ). Brighter, larger points above the line are flagged as suspicious.
+        The horizontal dashed line represents the current threshold (τ). Brighter, larger points above the line are flagged as suspicious only if they also violate an invariant.
       </div>
     </div>
   );
