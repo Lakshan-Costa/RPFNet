@@ -235,14 +235,14 @@ export default function App() {
     const newRows: Row[] = res.scores.map((s: number, i: number) => {
       const legacyReasons: string[] = res.invariant_violations?.[i] || [];
 
-      const richDetails: ViolationDetail[] | undefined = res.violation_details?.[i];
+      const richDetails: ViolationDetail[] = Array.isArray(res.violation_details) && Array.isArray(res.violation_details[i]) ? res.violation_details[i] : [];
 
       return {
         id: String(i),
         score: s,
         flagged: res.flags[i],
         reasons: legacyReasons,
-        violation_details: richDetails ?? legacyReasons.map(r => ({ invariant: r })),
+        violation_details: richDetails.length > 0 ? richDetails : (legacyReasons || []).map(r => ({ invariant: r })),
       };
     });
     setRows(newRows);
@@ -253,8 +253,6 @@ export default function App() {
     setTauLocal(res.tau_local ?? null);
     setTopK(prev => Math.min(prev, newRows.length));
   }
-
-  /* ── Cell Violation Chip ──────────────────────────────────── */
 
   function CellChip({ cell, themeColors }: { cell: CellViolation; themeColors: typeof t }) {
     const [expanded, setExpanded] = useState(false);
@@ -352,11 +350,11 @@ export default function App() {
   }
 
   function formatReasons(row: Row, isFlagged?: boolean) {
-    const details = row.violation_details;
-    const reasons = row.reasons;
+    const details = Array.isArray(row.violation_details) ? row.violation_details : [];
+    const reasons = Array.isArray(row.reasons)? row.reasons : [];
 
     // No violations at all
-    const hasDetails = details && details.length > 0;
+    const hasDetails = details.length > 0;
     const hasReasons = reasons && reasons.length > 0;
 
     if (!hasDetails && !hasReasons) {
@@ -375,7 +373,7 @@ export default function App() {
     if (hasDetails) {
       return (
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {details!.map((vd, idx) => (
+          {details.map((vd, idx) => (
             <div key={idx}>
               <span style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                 <strong style={{ fontSize: 12, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{vd.is_primary ? "Primary Violated Invariant - " : "Other Violated Invariants - "}{vd.invariant}</strong>

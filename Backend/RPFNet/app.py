@@ -330,13 +330,20 @@ def _estimate_contamination_rate_safe(scores: np.ndarray, scoring_mode: str = "i
     median_s = float(np.median(scores))
     mad_s    = float(np.median(np.abs(scores - median_s))) * 1.4826 + 1e-10
     mad_rate = float((scores > median_s + 4.0 * mad_s).mean())
-    mad_rate = np.clip(mad_rate, 0.003, 0.05)
+    mad_rate = np.clip(mad_rate, 0.0, 0.05)
 
     # Check bimodality
     bimodal = _is_bimodal(scores)
 
     if not bimodal:
-        # Clean unimodal distribution
+        # If distribution is very tight
+        if scores.std() < 1e-3:
+            return 0.0
+
+        # If MAD rate is extremely small
+        if mad_rate < 0.005:
+            return 0.0
+
         return float(mad_rate)
 
     # Otsu estimate
@@ -367,14 +374,15 @@ def _estimate_contamination_rate_safe(scores: np.ndarray, scoring_mode: str = "i
     return float(np.clip(otsu_rate, 0.01, 0.40))
 
 def _score_dataframe(df: pd.DataFrame, tau_override: float | None = None,
-                      dataset_hint: str = "") -> dict:
+                dataset_hint: str = "") -> dict:
+
     DATASET_THRESHOLDS.clear()
+
     X, y, sc, Xdf = _prepare(df)
     n = len(X)
 
-    # Get RAW anomaly scores
     raw_scores = None
-    mode       = "fallback"
+    mode = "fallback"
 
     if _loaded and _hybrid is not None:
         try:
@@ -385,60 +393,88 @@ def _score_dataframe(df: pd.DataFrame, tau_override: float | None = None,
             print(f"[backend] Hybrid scoring failed ({exc}), falling back")
 
     if raw_scores is None:
-        iso = IsolationForest(n_estimators=200, contamination="auto",
-                               random_state=42, n_jobs=-1)
+        iso = IsolationForest(
+            n_estimators=200,
+            contamination="auto",
+            random_state=42,
+            n_jobs=-1
+        )
         raw_scores = -iso.fit(X).score_samples(X)
         raw_scores = np.asarray(raw_scores, dtype=np.float64)
         mode = "isolation_forest"
 
-    s_min   = float(raw_scores.min())
-    s_max   = float(raw_scores.max())
+    if raw_scores.std() < 1e-4:
+        return {
+            "scores": ((raw_scores - raw_scores.min()) /
+                       (raw_scores.ptp() + 1e-10) * 10).tolist(),
+            "flags": [0] * n,
+            "invariant_violations": [[] for _ in range(n)],
+            "violation_details": [[] for _ in range(n)],
+            "n_rows": n,
+            "n_flagged": 0,
+            "pct_flagged": 0.0,
+            "tau": 0,
+            "tau_local": 0,
+            "global_threshold": _global_threshold(),
+            "threshold_source": "clean_detected",
+            "mode": mode,
+            "bimodal": False,
+            "score_stats": {}
+        }
+
+    s_min = float(raw_scores.min())
+    s_max = float(raw_scores.max())
     s_range = s_max - s_min + 1e-10
+
     display_scores = ((raw_scores - s_min) / s_range).astype(np.float64)
 
     tau_local_raw = _compute_tau_local(raw_scores)
 
     if tau_override is not None:
-        # User set the slider interpret as a value in display [0, 1] space
-        tau_display  = float(tau_override)
-        tau_raw      = s_min + tau_display * s_range
+        tau_display = float(tau_override)
+        tau_raw = s_min + tau_display * s_range
         threshold_source = "user_override"
+
     elif dataset_hint and dataset_hint in DATASET_THRESHOLDS:
-        tau_raw     = DATASET_THRESHOLDS[dataset_hint]
+        tau_raw = DATASET_THRESHOLDS[dataset_hint]
         tau_display = float((tau_raw - s_min) / s_range)
         threshold_source = f"per_dataset:{dataset_hint}"
+
     else:
-        est_rate    = _estimate_contamination_rate_safe(raw_scores,
-                                                        scoring_mode=mode)
-        tau_raw     = float(np.percentile(raw_scores, (1.0 - est_rate) * 100))
-        tau_display = float((tau_raw - s_min) / s_range)
+        est_rate = _estimate_contamination_rate_safe(
+            raw_scores, scoring_mode=mode
+        )
+
+        if est_rate <= 0.0:
+            tau_raw = float("inf")
+        else:
+            tau_raw = float(
+                np.percentile(raw_scores, (1.0 - est_rate) * 100)
+            )
+
+        tau_display = float((tau_raw - s_min) / s_range) \
+            if np.isfinite(tau_raw) else 1.0
+
         threshold_source = "auto_estimated"
 
-    # Convert local threshold to display space too
     tau_local_display = float((tau_local_raw - s_min) / s_range)
 
-    # Store for future calls
+    # Store threshold
     ds_key = dataset_hint or f"ds_{uuid.uuid4().hex[:8]}"
     DATASET_THRESHOLDS[ds_key] = tau_raw
 
-    # Flag rows
-    flags     = (raw_scores >= tau_raw).astype(int).tolist()
-    n_flagged = sum(flags)
-    pct_flagged = round(n_flagged / n * 100, 2) if n > 0 else 0.0
-
-    invariant_violations = []
+    invariant_violations = [[] for _ in range(n)]
+    violation_details = [[] for _ in range(n)]
 
     try:
-        # Extract RPF features (same as model uses)
         if _loaded and _meta is not None:
             rpf = _meta.extractor.extract(X, y)
         else:
-            # fallback extractor
             extractor = RPFExtractor()
             rpf = extractor.extract(X, y)
 
         _invariant_analyzer.fit_clean_bounds(X, y)
-        # Compute invariant scores per row
+
         legacy, details = _invariant_analyzer.compute_row_violation_details(
             X, y, feature_names=list(Xdf.columns)
         )
@@ -448,29 +484,47 @@ def _score_dataframe(df: pd.DataFrame, tau_override: float | None = None,
 
     except Exception as e:
         print(f"[backend] Invariant analysis failed: {e}")
-        invariant_violations = [[] for _ in range(len(X))]
+        # already safely initialized above
+
+    flags = []
+
+    for i in range(n):
+        score_flag = raw_scores[i] >= tau_raw if np.isfinite(tau_raw) else False
+
+        has_violation = (
+            len(violation_details[i]) > 0
+            if i < len(violation_details)
+            else False
+        )
+
+        # 🔥 KEY LOGIC
+        flag = int(score_flag and has_violation)
+        flags.append(flag)
+
+    n_flagged = sum(flags)
+    pct_flagged = round(n_flagged / n * 100, 2) if n > 0 else 0.0
 
     return {
-        "scores":           (display_scores * 10).tolist(),
-        "flags":            flags,
+        "scores": (display_scores * 10).tolist(),
+        "flags": flags,
         "invariant_violations": invariant_violations,
         "violation_details": violation_details,
-        "n_rows":           n,
-        "n_flagged":        n_flagged,
-        "pct_flagged":      pct_flagged,
-        "tau":              round(tau_display * 10, 2),
-        "tau_local":        round(tau_local_display * 10, 2),
+        "n_rows": n,
+        "n_flagged": n_flagged,
+        "pct_flagged": pct_flagged,
+        "tau": round(tau_display * 10, 2),
+        "tau_local": round(tau_local_display * 10, 2),
         "global_threshold": round(_global_threshold(), 4),
         "threshold_source": threshold_source,
-        "mode":             mode,
-        "bimodal":          _is_bimodal(raw_scores),
+        "mode": mode,
+        "bimodal": _is_bimodal(raw_scores),
         "score_stats": {
-            "min":  round(float(display_scores.min()), 4),
-            "p25":  round(float(np.percentile(display_scores, 25)), 4),
-            "p50":  round(float(np.median(display_scores)), 4),
-            "p75":  round(float(np.percentile(display_scores, 75)), 4),
-            "p95":  round(float(np.percentile(display_scores, 95)), 4),
-            "max":  round(float(display_scores.max()), 4),
+            "min": round(float(display_scores.min()), 4),
+            "p25": round(float(np.percentile(display_scores, 25)), 4),
+            "p50": round(float(np.median(display_scores)), 4),
+            "p75": round(float(np.percentile(display_scores, 75)), 4),
+            "p95": round(float(np.percentile(display_scores, 95)), 4),
+            "max": round(float(display_scores.max()), 4),
         },
     }
 
