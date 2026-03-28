@@ -20,19 +20,19 @@ class RPFExtractor:
     DIM = 61
 
     BLOCK_NAMES = {
-        "A"  : ("kNN Label Consistency",    slice(0,  8)),
-        "B"  : ("Class-Cond. Geometry",     slice(8,  17)),
-        "C"  : ("Scale Anomaly",            slice(17, 21)),
-        "D"  : ("Cross-Val Influence",      slice(21, 34)),
-        "E"  : ("Local Anomaly Extended",   slice(34, 47)),
-        "F"  : ("Regression/Influence",     slice(47, 55)),
-        "G"  : ("Structural Echo",          slice(55, 61)),
+        "A"  : ("kNN Label Consistency", slice(0,  8)),
+        "B"  : ("Class-Cond. Geometry", slice(8,  17)),
+        "C"  : ("Scale Anomaly", slice(17, 21)),
+        "D"  : ("Cross-Val Influence", slice(21, 34)),
+        "E"  : ("Local Anomaly Extended", slice(34, 47)),
+        "F"  : ("Regression/Influence", slice(47, 55)),
+        "G"  : ("Structural Echo", slice(55, 61)),
     }
 
     def __init__(self, k_small: int = 5, k_large: int = 15,
                  cv_folds: int = 5):
-        self.k_small  = k_small
-        self.k_large  = k_large
+        self.k_small = k_small
+        self.k_large = k_large
         self.cv_folds = cv_folds
         self._last_neighbors = None
 
@@ -60,10 +60,10 @@ class RPFExtractor:
     def extract(self, X: np.ndarray, y: np.ndarray,
                 y_cont: np.ndarray = None) -> np.ndarray:
         n, d = X.shape
-        rpf  = np.zeros((n, self.DIM), dtype=np.float32)
+        rpf = np.zeros((n, self.DIM), dtype=np.float32)
 
-        k1    = max(2, min(self.k_small, n - 2))
-        k2    = max(2, min(self.k_large, n - 2))
+        k1 = max(2, min(self.k_small, n - 2))
+        k2 = max(2, min(self.k_large, n - 2))
         k_max = k2 + 1
 
         D_all, I_all = self._compute_neighbors(X, k_max)
@@ -78,32 +78,34 @@ class RPFExtractor:
         self._block_g(X, y, rpf, k2, D_all, I_all)
 
         mu  = rpf.mean(0, keepdims=True)
-        std = rpf.std(0,  keepdims=True) + 1e-8
+        std = rpf.std(0, keepdims=True) + 1e-8
         rpf = (rpf - mu) / std
 
         return rpf.astype(np.float32)
 
     def _block_a(self, X, y, rpf, k1, k2, D_all, I_all):
         for slot, k in enumerate([k1, k2]):
-            D  = D_all[:, :k]
-            I  = I_all[:, :k]
+            D = D_all[:, :k]
+            I = I_all[:, :k]
             NL = y[I]
             same = (NL == y[:, np.newaxis])
 
             frac_same = same.mean(1)
-            d_same    = np.where(same, D, np.nan)
-            d_diff    = np.where(~same, D, np.nan)
-            max_d     = D.max() + 1.0
-            ms = np.nanmean(d_same, 1); ms = np.where(np.isnan(ms), max_d,     ms)
-            md = np.nanmean(d_diff, 1); md = np.where(np.isnan(md), max_d * 2, md)
+            d_same = np.where(same, D, np.nan)
+            d_diff = np.where(~same, D, np.nan)
+            max_d = D.max() + 1.0
+            ms = np.nanmean(d_same, 1)
+            ms = np.where(np.isnan(ms), max_d, ms)
+            md = np.nanmean(d_diff, 1)
+            md = np.where(np.isnan(md), max_d * 2, md)
             dist_ratio = np.log1p(ms) - np.log1p(md + 1e-8)
 
-            p       = np.clip(frac_same, 1e-8, 1 - 1e-8)
+            p = np.clip(frac_same, 1e-8, 1 - 1e-8)
             entropy = -(p * np.log(p) + (1-p) * np.log(1-p))
 
             near_same = np.where(same, D, np.inf).min(1)
             near_diff = np.where(~same, D, np.inf).min(1)
-            near_same = np.where(np.isinf(near_same), max_d,     near_same)
+            near_same = np.where(np.isinf(near_same), max_d, near_same)
             near_diff = np.where(np.isinf(near_diff), max_d * 2, near_diff)
             near_ratio = np.log1p(near_diff / (near_same + 1e-8))
 
@@ -114,13 +116,13 @@ class RPFExtractor:
             rpf[:, b + 3] = near_ratio
 
     def _block_b(self, X, y, rpf):
-        n       = len(X)
+        n = len(X)
         classes = np.unique(y)
-        K       = len(classes)
+        K = len(classes)
         if K < 2:
             return
 
-        mus  = np.zeros((K, X.shape[1]), np.float32)
+        mus = np.zeros((K, X.shape[1]), np.float32)
         stds = np.ones( (K, X.shape[1]), np.float32)
         valid = np.ones(K, bool)
         for ki, c in enumerate(classes):
@@ -129,7 +131,7 @@ class RPFExtractor:
             mus[ki]  = X[idx].mean(0)
             stds[ki] = X[idx].std(0) + 1e-8
 
-        c2ki   = {c: ki for ki, c in enumerate(classes)}
+        c2ki = {c: ki for ki, c in enumerate(classes)}
         own_ki = np.array([c2ki[yi] for yi in y])
         own_mu = mus[own_ki]
         own_st = stds[own_ki]
@@ -153,16 +155,16 @@ class RPFExtractor:
             mahal_all[:, ki] = np.sqrt(
                 ((X - mus[ki]) / stds[ki]) ** 2).mean(1)
 
-        same_mask   = (own_ki[:, None] == np.arange(K)[None, :])
+        same_mask = (own_ki[:, None] == np.arange(K)[None, :])
         mahal_other = np.where(same_mask, np.inf, mahal_all)
-        near_ki     = np.argmin(mahal_other, axis=1)
-        m_other     = mahal_other[np.arange(n), near_ki].astype(np.float32)
-        m_other     = np.where(np.isinf(m_other), m_own * 2, m_other)
-        near_mu     = mus[near_ki]
+        near_ki = np.argmin(mahal_other, axis=1)
+        m_other = mahal_other[np.arange(n), near_ki].astype(np.float32)
+        m_other = np.where(np.isinf(m_other), m_own * 2, m_other)
+        near_mu = mus[near_ki]
 
-        line     = near_mu - own_mu
+        line = near_mu - own_mu
         line_len = np.linalg.norm(line, axis=1, keepdims=True) + 1e-8
-        proj     = ((X - own_mu) * (line / line_len)).sum(1).astype(np.float32)
+        proj = ((X - own_mu) * (line / line_len)).sum(1).astype(np.float32)
 
         pct_own = np.zeros(n, np.float32)
         for ki, c in enumerate(classes):
@@ -170,15 +172,15 @@ class RPFExtractor:
             if len(idx) == 0: continue
             pct_own[idx] = rankdata(m_own[idx]).astype(np.float32) / len(idx)
 
-        norm_x  = np.linalg.norm(X,      axis=1) + 1e-8
-        norm_m  = np.linalg.norm(own_mu, axis=1) + 1e-8
+        norm_x = np.linalg.norm(X,      axis=1) + 1e-8
+        norm_m = np.linalg.norm(own_mu, axis=1) + 1e-8
         cos_own = (X * own_mu).sum(1) / (norm_x * norm_m)
 
         mid = (own_mu + near_mu) / 2
         bd  = ((X - mid) * (line / line_len)).sum(1).astype(np.float32)
 
-        rpf[:, 8]  = m_own
-        rpf[:, 9]  = m_other
+        rpf[:, 8] = m_own
+        rpf[:, 9] = m_other
         rpf[:, 10] = np.log1p(m_own + 1e-8) - np.log1p(m_other + 1e-8)
         rpf[:, 11] = proj / (line_len.squeeze() + 1e-8)
         rpf[:, 12] = pct_own
@@ -215,9 +217,9 @@ class RPFExtractor:
         for c in classes:
             idx = np.where(y == c)[0]
             if len(idx) < 2: continue
-            med     = np.median(X[idx], axis=0)
+            med = np.median(X[idx], axis=0)
             abs_dev = np.abs(X[idx] - med)
-            nd      = max(1, int(X.shape[1] * 0.10))
+            nd = max(1, int(X.shape[1] * 0.10))
             trimmed = np.sort(abs_dev, axis=1)[:, nd: -nd if nd else None]
             mad[idx] = (trimmed.mean(1) if trimmed.shape[1] > 0
                         else abs_dev.mean(1))
@@ -228,9 +230,9 @@ class RPFExtractor:
         rpf[:, 20] = mad
 
     def _block_d_oof(self, X: np.ndarray, y: np.ndarray, rpf: np.ndarray):
-        n       = len(X)
+        n = len(X)
         classes = np.unique(y)
-        K       = len(classes)
+        K = len(classes)
         n_folds = min(self.cv_folds, int(min(np.bincount(y.astype(int)))))
         n_folds = max(2, n_folds)
 
@@ -242,26 +244,27 @@ class RPFExtractor:
 
         rf_pred_class = np.zeros((n, n_folds), np.float32)
 
-        skf      = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=42)
+        skf = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=42)
         fold_idx = 0
 
         for train_idx, val_idx in skf.split(X, y):
             Xtr, Xvl = X[train_idx], X[val_idx]
-            ytr       = y[train_idx]
-            yvl       = y[val_idx]
+            ytr = y[train_idx]
+            yvl = y[val_idx]
             if len(np.unique(ytr)) < 2:
                 fold_idx += 1; continue
 
             try:
                 lr = LogisticRegression(C=1.0, max_iter=300,
                                         random_state=42).fit(Xtr, ytr)
-                proba_lr   = lr.predict_proba(Xvl)
-                lr_cls     = lr.classes_.tolist()
-                lr_col     = np.array([lr_cls.index(c) if c in lr_cls else 0
+                proba_lr = lr.predict_proba(Xvl)
+                lr_cls = lr.classes_.tolist()
+                lr_col = np.array([lr_cls.index(c) if c in lr_cls else 0
                                         for c in yvl])
                 plr_true[val_idx] = proba_lr[np.arange(len(val_idx)), lr_col]
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[RPFExtractor] _block_d_oof logistic regression failed: {type(e).__name__}: {e}")
+                continue
 
             try:
                 rf = RandomForestClassifier(
@@ -270,7 +273,7 @@ class RPFExtractor:
                 ).fit(Xtr, ytr)
 
                 proba_rf = rf.predict_proba(Xvl)
-                rf_cls   = rf.classes_.tolist()
+                rf_cls = rf.classes_.tolist()
 
                 rf_col = np.array([rf_cls.index(c) if c in rf_cls else 0
                                 for c in yvl])
@@ -284,30 +287,32 @@ class RPFExtractor:
                 proba_rf_cp[np.arange(len(val_idx)), rf_col] = 0.0
                 prf_max_other[val_idx] = proba_rf_cp.max(1)
 
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[RPFExtractor] _block_d_oof random forest failed: {type(e).__name__}: {e}")
+                continue
             try:
                 gb = GradientBoostingClassifier(
                     n_estimators=30, max_depth=3, learning_rate=0.1,
                     random_state=42
                 ).fit(Xtr, ytr)
                 proba_gb = gb.predict_proba(Xvl)
-                gb_cls   = gb.classes_.tolist()
-                gb_col   = np.array([gb_cls.index(c) if c in gb_cls else 0
+                gb_cls = gb.classes_.tolist()
+                gb_col = np.array([gb_cls.index(c) if c in gb_cls else 0
                                       for c in yvl])
                 pgb_true[val_idx] = proba_gb[np.arange(len(val_idx)), gb_col]
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[RPFExtractor] _block_d_oof gradient boosting failed: {type(e).__name__}: {e}")
+                continue
 
             fold_idx += 1
 
         wrong_lr = (1 - plr_true).astype(np.float32)
         wrong_rf = (1 - prf_true).astype(np.float32)
 
-        ce_lr    = -np.log(np.clip(plr_true, 1e-8, 1.0)).astype(np.float32)
-        ce_rf    = -np.log(np.clip(prf_true, 1e-8, 1.0)).astype(np.float32)
+        ce_lr = -np.log(np.clip(plr_true, 1e-8, 1.0)).astype(np.float32)
+        ce_rf = -np.log(np.clip(prf_true, 1e-8, 1.0)).astype(np.float32)
 
-        disagree  = np.abs(plr_true - prf_true).astype(np.float32)
+        disagree = np.abs(plr_true - prf_true).astype(np.float32)
         margin_rf = (prf_true - prf_max_other).astype(np.float32)
 
         rk_lr = rankdata(wrong_lr).astype(np.float32) / n
@@ -318,9 +323,9 @@ class RPFExtractor:
         class_instability = (rf_pred_class.std(1) > 0).astype(np.float32)
 
         rand_thresh = 1.0 / K
-        correct_lr  = (plr_true > rand_thresh).astype(np.float32)
-        correct_rf  = (prf_true > rand_thresh).astype(np.float32)
-        both_agree  = correct_lr * correct_rf
+        correct_lr = (plr_true > rand_thresh).astype(np.float32)
+        correct_rf = (prf_true > rand_thresh).astype(np.float32)
+        both_agree = correct_lr * correct_rf
 
         confidence = prf_true.copy()
         flip_ind = (prf_true < rand_thresh).astype(np.float32)
@@ -348,25 +353,27 @@ class RPFExtractor:
         k = min(k2, n - 2)
         D = D_all[:, :k]
         I = I_all[:, :k]
-        NL   = y[I]
+        NL = y[I]
         same = (NL == y[:, np.newaxis])
 
         try:
-            iso     = IsolationForest(n_estimators=100, random_state=42, n_jobs=-1)
+            iso = IsolationForest(n_estimators=100, random_state=42, n_jobs=-1)
             iso_raw = -iso.fit(X).score_samples(X)
         except Exception:
             iso_raw = np.zeros(n, np.float32)
 
         local_purity = same.mean(1)
-        mean_knn     = D.mean(1)
-        nb_mean      = mean_knn[I].mean(1)
-        lof_approx   = mean_knn / (nb_mean + 1e-8)
+        mean_knn = D.mean(1)
+        nb_mean = mean_knn[I].mean(1)
+        lof_approx = mean_knn / (nb_mean + 1e-8)
 
         d_same = np.where(same, D, np.nan)
         d_diff = np.where(~same, D, np.nan)
-        max_d  = D.max() + 1.0
-        ms = np.nanmean(d_same, 1); ms = np.where(np.isnan(ms), max_d,     ms)
-        md = np.nanmean(d_diff, 1); md = np.where(np.isnan(md), max_d * 2, md)
+        max_d = D.max() + 1.0
+        ms = np.nanmean(d_same, 1)
+        ms = np.where(np.isnan(ms), max_d, ms)
+        md = np.nanmean(d_diff, 1)
+        md = np.where(np.isnan(md), max_d * 2, md)
 
         local_geom   = D.std(1)
         iso_impurity = iso_raw * (1.0 - local_purity + 1e-3)
@@ -381,7 +388,7 @@ class RPFExtractor:
         rpf[:, 40] = iso_impurity
         rpf[:, 41] = rk_iso
 
-        classes   = np.unique(y)
+        classes = np.unique(y)
         any_valid = any(len(np.where(y == c)[0]) >= 2 for c in classes)
         if not any_valid:
             return
@@ -395,30 +402,30 @@ class RPFExtractor:
         rpf[:, 42] = density_ratio
 
         if D.shape[1] > 4:
-            trim    = max(1, int(D.shape[1] * 0.1))
-            D_trim  = np.sort(D, axis=1)[:, trim: -trim]
+            trim = max(1, int(D.shape[1] * 0.1))
+            D_trim = np.sort(D, axis=1)[:, trim: -trim]
             nb_trim = np.sort(D[I], axis=2)[:, :, trim: -trim].mean(2).mean(1)
             lof_trim = D_trim.mean(1) / (nb_trim + 1e-8)
         else:
             lof_trim = lof_approx
         rpf[:, 43] = lof_trim
 
-        K       = len(classes)
-        mus_d   = np.zeros((K, X.shape[1]), np.float32)
+        K = len(classes)
+        mus_d = np.zeros((K, X.shape[1]), np.float32)
         for ki, c in enumerate(classes):
             idx = np.where(y == c)[0]
             if len(idx) >= 2: mus_d[ki] = X[idx].mean(0)
-        c2ki_d  = {c: ki for ki, c in enumerate(classes)}
-        own_ki  = np.array([c2ki_d[yi] for yi in y])
-        own_mu  = mus_d[own_ki]
+        c2ki_d = {c: ki for ki, c in enumerate(classes)}
+        own_ki = np.array([c2ki_d[yi] for yi in y])
+        own_mu = mus_d[own_ki]
         dists_c = np.stack([np.linalg.norm(X - mus_d[ki], axis=1)
                              for ki in range(K)], axis=1)
-        same_m  = (own_ki[:, None] == np.arange(K)[None, :])
+        same_m = (own_ki[:, None] == np.arange(K)[None, :])
         dists_c[same_m] = np.inf
         near_ki = np.argmin(dists_c, axis=1)
         near_mu = mus_d[near_ki]
-        normal  = near_mu - own_mu
-        nlen    = np.linalg.norm(normal, axis=1, keepdims=True) + 1e-8
+        normal = near_mu - own_mu
+        nlen = np.linalg.norm(normal, axis=1, keepdims=True) + 1e-8
         rpf[:, 44] = ((X - own_mu) * (normal / nlen)).sum(1).astype(np.float32)
 
         med_same = np.where(same, D, np.inf).min(1)
@@ -426,10 +433,10 @@ class RPFExtractor:
         rpf[:, 45] = np.where(~same, D < med_same[:, None], False).mean(1)
 
         try:
-            sur      = LogisticRegression(C=1.0, max_iter=300,
+            sur = LogisticRegression(C=1.0, max_iter=300,
                                           random_state=42).fit(X, y)
             ambiguity = (1.0 - sur.predict_proba(X).max(1)).astype(np.float32)
-            amb_rank  = np.zeros(n, np.float32)
+            amb_rank = np.zeros(n, np.float32)
             for c in classes:
                 idx = np.where(y == c)[0]
                 if len(idx) == 0: continue
