@@ -172,7 +172,8 @@ def apply_attack(name, X, y, fraction, seed=42, y_cont=None):
             sur = LogisticRegression(C=1.0, max_iter=1000, random_state=42).fit(X, y)
             w, b = sur.coef_[0], sur.intercept_[0]
             for i in pidx:
-                xi = Xp[i].copy(); tgt = 1 - int(y[i])
+                xi = Xp[i].copy()
+                tgt = 1 - int(y[i])
                 for _ in range(10):
                     xi -= 1.5 * np.sign((_sig(xi @ w + b) - tgt) * w)
                 Xp[i] = xi
@@ -195,10 +196,12 @@ def apply_attack(name, X, y, fraction, seed=42, y_cont=None):
             sur = LogisticRegression(C=1.0, max_iter=1000, random_state=42).fit(X, y)
             w, b = sur.coef_[0], sur.intercept_[0]
             for i in pidx:
-                xi = Xp[i].copy(); yi = 1 - int(y[i])
+                xi = Xp[i].copy()
+                yi = 1 - int(y[i])
                 for _ in range(5):
                     xi += 0.5 * np.sign((_sig(xi @ w + b) - yi) * w)
-                Xp[i] = xi; yp[i] = yi
+                Xp[i] = xi
+                yp[i] = yi
         else:
             for i in pidx:
                 tgt = _flip_label(yp[i], classes, rng)
@@ -208,16 +211,16 @@ def apply_attack(name, X, y, fraction, seed=42, y_cont=None):
                 yp[i] = tgt
 
     elif name == "boundary_flip":
-        sur  = LogisticRegression(C=1.0, max_iter=1000, random_state=42).fit(X, y)
+        sur = LogisticRegression(C=1.0, max_iter=1000, random_state=42).fit(X, y)
         if is_bin:
-            conf  = np.abs(sur.predict_proba(X)[:, 1] - 0.5)
+            conf = np.abs(sur.predict_proba(X)[:, 1] - 0.5)
             cands = np.argsort(conf)[:int(n * 3)]
-            pidx  = rng.choice(cands, min(n, len(cands)), replace=False)
+            pidx = rng.choice(cands, min(n, len(cands)), replace=False)
             yp[pidx] = 1 - yp[pidx]
         else:
-            conf  = sur.predict_proba(X).max(1)
+            conf = sur.predict_proba(X).max(1)
             cands = np.argsort(conf)[:int(n * 3)]
-            pidx  = rng.choice(cands, min(n, len(cands)), replace=False)
+            pidx = rng.choice(cands, min(n, len(cands)), replace=False)
             for i in pidx: yp[i] = _flip_label(yp[i], classes, rng)
 
     elif name == "gauss_noise":
@@ -230,13 +233,15 @@ def apply_attack(name, X, y, fraction, seed=42, y_cont=None):
     elif name == "interpolation":
         for i in pidx:
             if is_bin:
-                c0 = np.where(y == 0)[0]; c1 = np.where(y == 1)[0]
+                c0 = np.where(y == 0)[0]
+                c1 = np.where(y == 1)[0]
                 a = rng.uniform(0.3, 0.7)
                 Xp[i] = a * X[rng.choice(c0)] + (1 - a) * X[rng.choice(c1)]
                 yp[i] = 1 if a > 0.5 else 0
             else:
                 c_a, c_b = rng.choice(classes, size=2, replace=False)
-                ia = np.where(y == c_a)[0]; ib = np.where(y == c_b)[0]
+                ia = np.where(y == c_a)[0]
+                ib = np.where(y == c_b)[0]
                 if len(ia) == 0 or len(ib) == 0: continue
                 a = rng.uniform(0.3, 0.7)
                 Xp[i] = a * X[rng.choice(ia)] + (1 - a) * X[rng.choice(ib)]
@@ -276,7 +281,8 @@ def apply_attack(name, X, y, fraction, seed=42, y_cont=None):
         for i in pidx: Xp[i] = 2.0 * Xp[i]
 
     elif name == "outlier_inject":
-        means = X.mean(0); stds = X.std(0) + 1e-8
+        means = X.mean(0)
+        stds = X.std(0) + 1e-8
         nd = max(1, int(X.shape[1] * 0.2))
         for i in pidx:
             fs = rng.choice(X.shape[1], nd, replace=False)
@@ -310,7 +316,7 @@ def apply_attack(name, X, y, fraction, seed=42, y_cont=None):
             tgt = _flip_label(yp[i], classes, rng)
             tgt_idx = np.where(y == tgt)[0]
             if len(tgt_idx) == 0: continue
-            tgt_mu  = X[tgt_idx].mean(0)
+            tgt_mu = X[tgt_idx].mean(0)
             alpha = rng.uniform(0.4, 0.6)
             Xp[i] = ((1 - alpha) * Xp[i] + alpha * tgt_mu
                        + rng.normal(0, 0.1, X.shape[1]))
