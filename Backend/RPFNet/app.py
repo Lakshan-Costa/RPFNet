@@ -36,6 +36,7 @@ from RPFNet.Attack import apply_attack
 from RPFNet.RPFExtractor import RPFExtractor
 from RPFNet.Dataset import load_builtin, load_csv
 from RPFNet.RateEstimator import estimate_contamination_rate, score_distribution_features, RateEstimatorHead
+import traceback
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 try:
     from detection import (
@@ -71,7 +72,7 @@ UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 _lock = threading.Lock()
-_meta:   "RPFNetPoisonDetector"   | None = None
+_meta: "RPFNetPoisonDetector" | None = None
 _hybrid: "HybridEnsembleDetector" | None = None
 _loaded = False
 _invariant_analyzer = InvariantAnalyzer(alpha=0.05)
@@ -112,9 +113,9 @@ def _load_model_compat(meta, path):
     meta.net = _NetClass(input_dim=saved_dim).to(meta.device)
     meta.net.load_state_dict(ckpt["net"])
     meta._threshold = ckpt.get("threshold", 0.5)
-    meta._fitted    = ckpt.get("fitted", True)
-    meta.extractor.k_small  = ckpt.get("k_small", RPF_K_SMALL)
-    meta.extractor.k_large  = ckpt.get("k_large", RPF_K_LARGE)
+    meta._fitted = ckpt.get("fitted", True)
+    meta.extractor.k_small = ckpt.get("k_small", RPF_K_SMALL)
+    meta.extractor.k_large = ckpt.get("k_large", RPF_K_LARGE)
     meta.extractor.cv_folds = ckpt.get("cv_folds", RPF_CV_FOLDS)
 
     if "rate_head" in ckpt:
@@ -178,7 +179,6 @@ def _load_model() -> None:
             print(f"[backend] No model file found — tried: {candidates[:3]}")
             print(f"[backend] Running in score-only mode (IsolationForest fallback)")
     except Exception as exc:
-        import traceback
         print(f"[backend] Model load failed: {exc}")
         traceback.print_exc()
 
@@ -247,7 +247,7 @@ def _is_bimodal(scores: np.ndarray) -> bool:
     if len(diffs) > 0 and diffs.max() / score_range > 0.15:
         signals += 1
 
-    mu  = s.mean()
+    mu = s.mean()
     std = s.std() + 1e-10
     kurt = float(np.mean(((s - mu) / std) ** 4)) - 3.0
     if kurt < -1.0:
@@ -268,8 +268,9 @@ def _is_bimodal(scores: np.ndarray) -> bool:
                 and counts[i+1] > counts[i] and counts[i+2] > counts[i]):
                 signals += 1
                 break
-    except Exception:
-        pass
+    except Exception as exc:
+        print(f"[backend] _is_bimodal failed: {exc}")
+        traceback.print_exc()
 
     return signals >= 2
 
@@ -281,10 +282,10 @@ def _compute_tau_local(scores: np.ndarray) -> float:
         s = np.sort(scores)
         n = len(s)
         best_thresh = float(s[-1])
-        best_var    = 0.0
+        best_var = 0.0
 
         for pct in np.arange(0.50, 0.995, 0.005):
-            t     = np.percentile(s, pct * 100)
+            t = np.percentile(s, pct * 100)
             below = s[s <= t]
             above = s[s > t]
             if len(below) < 5 or len(above) < 2:
@@ -293,12 +294,12 @@ def _compute_tau_local(scores: np.ndarray) -> float:
             w1 = len(above) / n
             between_var = w0 * w1 * (below.mean() - above.mean()) ** 2
             if between_var > best_var:
-                best_var    = between_var
+                best_var = between_var
                 best_thresh = float(t)
         return best_thresh
     else:
         median_s = float(np.median(scores))
-        mad_s    = float(np.median(np.abs(scores - median_s))) * 1.4826 + 1e-10
+        mad_s = float(np.median(np.abs(scores - median_s))) * 1.4826 + 1e-10
         return median_s + 4.0 * mad_s
 
 def _estimate_contamination_rate_safe(scores: np.ndarray, scoring_mode: str = "isolation_forest") -> float:
@@ -308,7 +309,7 @@ def _estimate_contamination_rate_safe(scores: np.ndarray, scoring_mode: str = "i
         return 0.01
 
     median_s = float(np.median(scores))
-    mad_s    = float(np.median(np.abs(scores - median_s))) * 1.4826 + 1e-10
+    mad_s = float(np.median(np.abs(scores - median_s))) * 1.4826 + 1e-10
     mad_rate = float((scores > median_s + 4.0 * mad_s).mean())
     mad_rate = np.clip(mad_rate, 0.003, 0.05)
 
@@ -317,7 +318,7 @@ def _estimate_contamination_rate_safe(scores: np.ndarray, scoring_mode: str = "i
     if not bimodal:
         return float(mad_rate)
 
-    tau_otsu  = _compute_tau_local(scores)
+    tau_otsu = _compute_tau_local(scores)
     otsu_rate = float((scores > tau_otsu).mean())
 
     below = scores[scores <= tau_otsu]
@@ -346,7 +347,7 @@ def _score_dataframe(df: pd.DataFrame, tau_override: float | None = None,
     QUICK_CANDIDATE_LIMIT = 500
 
     raw_scores = None
-    mode       = "fallback"
+    mode = "fallback"
 
     if not quick and _loaded and _hybrid is not None:
         try:
@@ -364,25 +365,25 @@ def _score_dataframe(df: pd.DataFrame, tau_override: float | None = None,
         raw_scores = np.asarray(raw_scores, dtype=np.float64)
         mode = "isolation_forest_quick" if quick else "isolation_forest"
 
-    s_min   = float(raw_scores.min())
-    s_max   = float(raw_scores.max())
+    s_min = float(raw_scores.min())
+    s_max = float(raw_scores.max())
     s_range = s_max - s_min + 1e-10
     display_scores = ((raw_scores - s_min) / s_range).astype(np.float64)
 
     tau_local_raw = _compute_tau_local(raw_scores)
 
     if tau_override is not None:
-        tau_display  = float(tau_override)
-        tau_raw      = s_min + tau_display * s_range
+        tau_display = float(tau_override)
+        tau_raw = s_min + tau_display * s_range
         threshold_source = "user_override"
     elif dataset_hint and dataset_hint in DATASET_THRESHOLDS:
-        tau_raw     = DATASET_THRESHOLDS[dataset_hint]
+        tau_raw = DATASET_THRESHOLDS[dataset_hint]
         tau_display = float((tau_raw - s_min) / s_range)
         threshold_source = f"per_dataset:{dataset_hint}"
     else:
-        est_rate    = _estimate_contamination_rate_safe(raw_scores,
+        est_rate = _estimate_contamination_rate_safe(raw_scores,
                                                         scoring_mode=mode)
-        tau_raw     = float(np.percentile(raw_scores, (1.0 - est_rate) * 100))
+        tau_raw = float(np.percentile(raw_scores, (1.0 - est_rate) * 100))
         tau_display = float((tau_raw - s_min) / s_range)
         threshold_source = "auto_estimated"
 
@@ -458,50 +459,50 @@ def _score_dataframe(df: pd.DataFrame, tau_override: float | None = None,
     pct_flagged = round(n_flagged / n * 100, 2) if n > 0 else 0.0
 
     return {
-        "scores":           (display_scores * 10).tolist(),
-        "flags":            flags,
+        "scores": (display_scores * 10).tolist(),
+        "flags": flags,
         "invariant_violations": invariant_violations,
         "violation_details": violation_details,
-        "n_rows":           n,
-        "n_flagged":        n_flagged,
-        "pct_flagged":      pct_flagged,
-        "tau":              round(tau_display * 10, 2),
-        "tau_local":        round(tau_local_display * 10, 2),
+        "n_rows": n,
+        "n_flagged": n_flagged,
+        "pct_flagged": pct_flagged,
+        "tau": round(tau_display * 10, 2),
+        "tau_local": round(tau_local_display * 10, 2),
         "global_threshold": round(_global_threshold(), 4),
         "threshold_source": threshold_source,
-        "mode":             mode,
-        "bimodal":          bimodal,
+        "mode": mode,
+        "bimodal": bimodal,
         "clean_distribution": clean_distribution,
-        "quick":              quick,
+        "quick": quick,
         "score_stats": {
-            "min":  round(float(display_scores.min()), 4),
-            "p25":  round(float(np.percentile(display_scores, 25)), 4),
-            "p50":  round(float(np.median(display_scores)), 4),
-            "p75":  round(float(np.percentile(display_scores, 75)), 4),
-            "p95":  round(float(np.percentile(display_scores, 95)), 4),
-            "max":  round(float(display_scores.max()), 4),
+            "min": round(float(display_scores.min()), 4),
+            "p25": round(float(np.percentile(display_scores, 25)), 4),
+            "p50": round(float(np.median(display_scores)), 4),
+            "p75": round(float(np.percentile(display_scores, 75)), 4),
+            "p95": round(float(np.percentile(display_scores, 95)), 4),
+            "max": round(float(display_scores.max()), 4),
         },
     }
 
 @app.route("/health")
 def health():
     return jsonify({
-        "status":                    "ok" if _loaded else "no_model",
-        "mode":                      "hybrid" if _loaded else "isolation_forest",
-        "global_threshold":          _global_threshold(),
-        "n_per_dataset_thresholds":  len(DATASET_THRESHOLDS),
-        "trained_datasets":          list(DATASET_THRESHOLDS.keys()),
-        "model_available":           MODEL_AVAILABLE,
-        "model_loaded":              _loaded,
-        "model_path":                RPFNet_MODEL_PATH,
-        "model_exists":              os.path.exists(RPFNet_MODEL_PATH),
-        "import_error":              MODEL_IMPORT_ERR,
-        "rpf_dim_loaded":            _LOADED_RPF_DIM,
-        "rpf_dim_code":              RPFExtractor.DIM if MODEL_AVAILABLE else None,
-        "compat_mode":               (_LOADED_RPF_DIM is not None
-                                       and MODEL_AVAILABLE
-                                       and _LOADED_RPF_DIM != RPFExtractor.DIM),
-        "backend_version":           "v3-fixed",
+        "status": "ok" if _loaded else "no_model",
+        "mode": "hybrid" if _loaded else "isolation_forest",
+        "global_threshold": _global_threshold(),
+        "n_per_dataset_thresholds": len(DATASET_THRESHOLDS),
+        "trained_datasets": list(DATASET_THRESHOLDS.keys()),
+        "model_available": MODEL_AVAILABLE,
+        "model_loaded": _loaded,
+        "model_path": RPFNet_MODEL_PATH,
+        "model_exists": os.path.exists(RPFNet_MODEL_PATH),
+        "import_error": MODEL_IMPORT_ERR,
+        "rpf_dim_loaded": _LOADED_RPF_DIM,
+        "rpf_dim_code": RPFExtractor.DIM if MODEL_AVAILABLE else None,
+        "compat_mode": (_LOADED_RPF_DIM is not None
+                        and MODEL_AVAILABLE
+                        and _LOADED_RPF_DIM != RPFExtractor.DIM),
+        "backend_version": "v3-fixed",
     })
 
 
@@ -509,7 +510,7 @@ def health():
 def thresholds():
     return jsonify({
         "per_dataset": DATASET_THRESHOLDS,
-        "global":      _global_threshold(),
+        "global": _global_threshold(),
     })
 
 @app.route("/stream/start", methods=["POST"])
@@ -536,9 +537,9 @@ def analyze_csv():
     if not f.filename or not f.filename.lower().endswith(".csv"):
         return jsonify({"error": "Only .csv files are supported"}), 400
 
-    tau_str      = request.form.get("tau", "").strip()
+    tau_str = request.form.get("tau", "").strip()
     dataset_hint = request.form.get("dataset_hint", "").strip()
-    quick        = request.form.get("quick", "").strip().lower() in ("1", "true", "yes")
+    quick = request.form.get("quick", "").strip().lower() in ("1", "true", "yes")
     tau_override = float(tau_str) / 10.0 if tau_str else None
 
     try:
@@ -604,7 +605,7 @@ def analyze_uci():
 @limiter.limit("5 per minute")
 def analyze_url():
     body = request.get_json(silent=True) or {}
-    url  = (body.get("url") or "").strip()
+    url = (body.get("url") or "").strip()
     if not url:
         return jsonify({"error": "url is required"}), 400
 
@@ -724,9 +725,9 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     print(f"[backend] Starting on http://0.0.0.0:{port}")
     print(f"[backend] RPFNet model: {RPFNet_MODEL_PATH}")
-    print(f"[backend] Model available:  {MODEL_AVAILABLE}")
+    print(f"[backend] Model available: {MODEL_AVAILABLE}")
     if not MODEL_AVAILABLE:
         print(f"[backend] Import error: {MODEL_IMPORT_ERR}")
         print("[backend] Will use IsolationForest fallback for scoring.")
-    app.run(host="0.0.0.0", port=port, debug=True,
+    app.run(host="0.0.0.0", port=port, debug=False,
             threaded=True, use_reloader=False)
