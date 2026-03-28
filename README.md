@@ -1,3 +1,4 @@
+[![CodeFactor](https://www.codefactor.io/repository/github/lakshan-costa/rpfnet/badge)](https://www.codefactor.io/repository/github/lakshan-costa/rpfnet)
 # RPFNet
 Final Year Project, RPFNet: A Relational Invariant Approach to Attack-Agnostic Poisoning Detection in Tabular Data
 
