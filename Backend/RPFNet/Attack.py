@@ -23,13 +23,13 @@ def _flip_label(yi, classes, rng):
 
 
 def apply_attack(name, X, y, fraction, seed=42, y_cont=None):
-    rng     = np.random.default_rng(seed)
-    n       = max(1, int(len(X) * fraction))
-    Xp, yp  = X.copy(), y.copy()
+    rng = np.random.default_rng(seed)
+    n = max(1, int(len(X) * fraction))
+    Xp, yp = X.copy(), y.copy()
     y_cont_p = y_cont.copy() if y_cont is not None else None
-    pidx    = rng.choice(len(X), n, replace=False)
+    pidx = rng.choice(len(X), n, replace=False)
     classes = np.unique(y)
-    is_bin  = len(classes) == 2
+    is_bin = len(classes) == 2
 
     if name == "target_shift":
         # Shift continuous targets
@@ -81,7 +81,7 @@ def apply_attack(name, X, y, fraction, seed=42, y_cont=None):
             for i in pidx: yp[i] = _flip_label(yp[i], classes, rng)
 
     elif name == "tree_aware":
-        rf  = RandomForestClassifier(random_state=42, n_jobs=-1).fit(X, y)
+        rf = RandomForestClassifier(random_state=42, n_jobs=-1).fit(X, y)
         top = np.argsort(-rf.feature_importances_)[:5]
         for i in pidx:
             for f in top: Xp[i, f] += 0.15 * rng.choice([-1, 1])
@@ -249,15 +249,15 @@ def apply_attack(name, X, y, fraction, seed=42, y_cont=None):
 
     elif name == "targeted_class":
         if is_bin:
-            c1   = np.where(y == 1)[0]
+            c1 = np.where(y == 1)[0]
             pidx = rng.choice(c1, min(n, len(c1)), replace=False)
             yp[pidx] = 0
         else:
-            counts  = np.bincount(y.astype(int))
+            counts = np.bincount(y.astype(int))
             src_cls = int(np.argmax(counts))
             tgt_cls = int(np.argsort(counts)[-2])
             src_idx = np.where(y == src_cls)[0]
-            pidx    = rng.choice(src_idx, min(n, len(src_idx)), replace=False)
+            pidx = rng.choice(src_idx, min(n, len(src_idx)), replace=False)
             yp[pidx] = tgt_cls
 
     elif name == "feat_perturb":
@@ -311,10 +311,10 @@ def apply_attack(name, X, y, fraction, seed=42, y_cont=None):
             tgt_idx = np.where(y == tgt)[0]
             if len(tgt_idx) == 0: continue
             tgt_mu  = X[tgt_idx].mean(0)
-            alpha   = rng.uniform(0.4, 0.6)
-            Xp[i]   = ((1 - alpha) * Xp[i] + alpha * tgt_mu
+            alpha = rng.uniform(0.4, 0.6)
+            Xp[i] = ((1 - alpha) * Xp[i] + alpha * tgt_mu
                        + rng.normal(0, 0.1, X.shape[1]))
-            yp[i]   = tgt
+            yp[i] = tgt
 
     else:
         raise ValueError(f"Unknown attack '{name}'.")

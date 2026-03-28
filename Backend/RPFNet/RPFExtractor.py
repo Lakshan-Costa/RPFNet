@@ -20,13 +20,13 @@ class RPFExtractor:
     DIM = 61
 
     BLOCK_NAMES = {
-        "A"  : ("kNN Label Consistency", slice(0,  8)),
-        "B"  : ("Class-Cond. Geometry", slice(8,  17)),
-        "C"  : ("Scale Anomaly", slice(17, 21)),
-        "D"  : ("Cross-Val Influence", slice(21, 34)),
-        "E"  : ("Local Anomaly Extended", slice(34, 47)),
-        "F"  : ("Regression/Influence", slice(47, 55)),
-        "G"  : ("Structural Echo", slice(55, 61)),
+        "A" : ("kNN Label Consistency", slice(0, 8)),
+        "B" : ("Class-Cond. Geometry", slice(8, 17)),
+        "C" : ("Scale Anomaly", slice(17, 21)),
+        "D" : ("Cross-Val Influence", slice(21, 34)),
+        "E" : ("Local Anomaly Extended", slice(34, 47)),
+        "F" : ("Regression/Influence", slice(47, 55)),
+        "G" : ("Structural Echo", slice(55, 61)),
     }
 
     def __init__(self, k_small: int = 5, k_large: int = 15,
@@ -77,7 +77,7 @@ class RPFExtractor:
         self._block_f(X, y, rpf, D_all, I_all, y_cont=y_cont)
         self._block_g(X, y, rpf, k2, D_all, I_all)
 
-        mu  = rpf.mean(0, keepdims=True)
+        mu = rpf.mean(0, keepdims=True)
         std = rpf.std(0, keepdims=True) + 1e-8
         rpf = (rpf - mu) / std
 
@@ -127,8 +127,10 @@ class RPFExtractor:
         valid = np.ones(K, bool)
         for ki, c in enumerate(classes):
             idx = np.where(y == c)[0]
-            if len(idx) < 2: valid[ki] = False; continue
-            mus[ki]  = X[idx].mean(0)
+            if len(idx) < 2: 
+                valid[ki] = False
+                continue
+            mus[ki] = X[idx].mean(0)
             stds[ki] = X[idx].std(0) + 1e-8
 
         c2ki = {c: ki for ki, c in enumerate(classes)}
@@ -151,7 +153,9 @@ class RPFExtractor:
 
         mahal_all = np.zeros((n, K), np.float32)
         for ki in range(K):
-            if not valid[ki]: mahal_all[:, ki] = 1e9; continue
+            if not valid[ki]: 
+                mahal_all[:, ki] = 1e9
+                continue
             mahal_all[:, ki] = np.sqrt(
                 ((X - mus[ki]) / stds[ki]) ** 2).mean(1)
 
@@ -172,12 +176,12 @@ class RPFExtractor:
             if len(idx) == 0: continue
             pct_own[idx] = rankdata(m_own[idx]).astype(np.float32) / len(idx)
 
-        norm_x = np.linalg.norm(X,      axis=1) + 1e-8
+        norm_x = np.linalg.norm(X, axis=1) + 1e-8
         norm_m = np.linalg.norm(own_mu, axis=1) + 1e-8
         cos_own = (X * own_mu).sum(1) / (norm_x * norm_m)
 
         mid = (own_mu + near_mu) / 2
-        bd  = ((X - mid) * (line / line_len)).sum(1).astype(np.float32)
+        bd = ((X - mid) * (line / line_len)).sum(1).astype(np.float32)
 
         rpf[:, 8] = m_own
         rpf[:, 9] = m_other
@@ -201,7 +205,8 @@ class RPFExtractor:
         for c in classes:
             idx = np.where(y == c)[0]
             if len(idx) < 2: continue
-            mu_n = l2[idx].mean(); sd_n = l2[idx].std() + 1e-8
+            mu_n = l2[idx].mean()
+            sd_n = l2[idx].std() + 1e-8
             l2_z[idx] = (l2[idx] - mu_n) / sd_n
 
         mus_c = {c: X[y == c].mean(0) for c in classes if (y == c).sum() >= 2}
@@ -252,7 +257,8 @@ class RPFExtractor:
             ytr = y[train_idx]
             yvl = y[val_idx]
             if len(np.unique(ytr)) < 2:
-                fold_idx += 1; continue
+                fold_idx += 1
+                continue
 
             try:
                 lr = LogisticRegression(C=1.0, max_iter=300,
@@ -375,9 +381,9 @@ class RPFExtractor:
         md = np.nanmean(d_diff, 1)
         md = np.where(np.isnan(md), max_d * 2, md)
 
-        local_geom   = D.std(1)
+        local_geom = D.std(1)
         iso_impurity = iso_raw * (1.0 - local_purity + 1e-3)
-        rk_iso       = rankdata(iso_raw).astype(np.float32) / n
+        rk_iso = rankdata(iso_raw).astype(np.float32) / n
 
         rpf[:, 34] = iso_raw
         rpf[:, 35] = local_purity
@@ -506,10 +512,10 @@ class RPFExtractor:
                  k2: int, D_all: np.ndarray, I_all: np.ndarray):
         n = len(X)
         k = min(k2, D_all.shape[1])
-        I = I_all[:, :k]
+        I_neighbors = I_all[:, :k]
         D = D_all[:, :k]
 
-        I_flat = I.ravel()
+        I_flat = I_neighbors.ravel()
         rev_counts = np.bincount(I_flat, minlength=n).astype(np.float32)
 
         rev_mean = rev_counts.mean() + 1e-8
