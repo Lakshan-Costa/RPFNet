@@ -78,10 +78,11 @@ def ablation_study(meta, X_tr, y_tr, attacks, rate=0.10, n_trials=3, y_cont=None
                                              fraction=rate, seed=trial * 31,
                                              y_cont=y_cont)
                 if len(pidx) < 3: continue
-                ytrue = np.zeros(len(Xp)); ytrue[pidx] = 1
-                k     = max(1, int(len(Xp) * rate))
+                ytrue = np.zeros(len(Xp))
+                ytrue[pidx] = 1
+                k = max(1, int(len(Xp) * rate))
 
-                rpf_full  = meta.extractor.extract(Xp, yp, y_cont=y_cont)
+                rpf_full = meta.extractor.extract(Xp, yp, y_cont=y_cont)
                 sc_full = meta._score_rpf(rpf_full)
                 pred_full = np.zeros(len(Xp), dtype=int)
                 pred_full[np.argsort(sc_full)[-k:]] = 1
@@ -301,7 +302,7 @@ def plot_ablation(meta_det, eval_ds):
     descs = [RPFExtractor.BLOCK_NAMES[b][0] for b in blocks]
     means = [np.mean(block_drops_all[b]) if block_drops_all[b] else 0
                for b in blocks]
-    stds = [np.std(block_drops_all[b])  if block_drops_all[b] else 0
+    stds = [np.std(block_drops_all[b]) if block_drops_all[b] else 0
                for b in blocks]
 
     colors = ["#3B82F6", "#8B5CF6", "#EC4899", "#F59E0B", "#10B981", "#EF4444"]

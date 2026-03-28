@@ -94,7 +94,7 @@ def _try_import_backend() -> bool:
     try:
         rpf_mod = _import("RPFExtractor")
         rate_mod = _import("RateEstimator")
-        _RPFExtractor_cls  = rpf_mod.RPFExtractor
+        _RPFExtractor_cls = rpf_mod.RPFExtractor
         _RateEstimatorHead = rate_mod.RateEstimatorHead
     except Exception as e:
         print(f"[rpfnet] Core submodule import failed: {e}")
@@ -119,12 +119,12 @@ def _try_import_backend() -> bool:
     if detected_path and os.path.isabs(detected_path) and os.path.exists(detected_path):
         _META_MODEL_PATH = detected_path
 
-    _META_EPOCHS = getattr(det, "RPFNet_EPOCHS",     _META_EPOCHS)
+    _META_EPOCHS = getattr(det, "RPFNet_EPOCHS", _META_EPOCHS)
     _META_BATCH_SIZE = getattr(det, "RPFNet_BATCH_SIZE", _META_BATCH_SIZE)
-    _META_LR = getattr(det, "RPFNet_LR",         _META_LR)
+    _META_LR = getattr(det, "RPFNet_LR", _META_LR)
     # k / cv values from detection.py if present, else keep defaults
-    _RPF_K_SMALL = getattr(det, "RPF_K_SMALL",  _RPF_K_SMALL)
-    _RPF_K_LARGE = getattr(det, "RPF_K_LARGE",  _RPF_K_LARGE)
+    _RPF_K_SMALL = getattr(det, "RPF_K_SMALL", _RPF_K_SMALL)
+    _RPF_K_LARGE = getattr(det, "RPF_K_LARGE", _RPF_K_LARGE)
     _RPF_CV_FOLDS = getattr(det, "RPF_CV_FOLDS", _RPF_CV_FOLDS)
 
     _BACKEND_AVAILABLE = True
@@ -164,11 +164,11 @@ def _load_model_compat(meta, path: str) -> bool:
     meta.net = _NetClass(input_dim=saved_dim).to(meta.device)
     meta.net.load_state_dict(ckpt["net"])
     meta._threshold = ckpt.get("threshold", 0.5)
-    meta._fitted    = ckpt.get("fitted", True)
+    meta._fitted = ckpt.get("fitted", True)
 
     if hasattr(meta, "extractor"):
-        meta.extractor.k_small = ckpt.get("k_small",  _RPF_K_SMALL)
-        meta.extractor.k_large = ckpt.get("k_large",  _RPF_K_LARGE)
+        meta.extractor.k_small = ckpt.get("k_small", _RPF_K_SMALL)
+        meta.extractor.k_large = ckpt.get("k_large", _RPF_K_LARGE)
         meta.extractor.cv_folds = ckpt.get("cv_folds", _RPF_CV_FOLDS)
 
     if "rate_head" in ckpt:
@@ -244,7 +244,7 @@ def _ensure_model():
         else:
             hybrid.attach_rate_head(meta.rate_head)
 
-        _meta   = meta
+        _meta = meta
         _hybrid = hybrid
         _model_loaded = True
         print(f"[rpfnet] Model loaded from {model_path}  device={device}")
@@ -319,7 +319,7 @@ def _is_bimodal(scores: np.ndarray) -> bool:
         signals += 1
 
     # Clearly platykurtic distribution
-    mu  = s.mean()
+    mu = s.mean()
     std = s.std() + 1e-10
     kurt = float(np.mean(((s - mu) / std) ** 4)) - 3.0
     if kurt < -1.0:
@@ -370,7 +370,7 @@ def _compute_tau(scores: np.ndarray) -> float:
             w1 = len(above) / n
             bv = w0 * w1 * (below.mean() - above.mean()) ** 2
             if bv > best_var:
-                best_var    = bv
+                best_var = bv
                 best_thresh = float(t)
         return best_thresh
     else:
@@ -448,7 +448,7 @@ def _score_dataframe(df: pd.DataFrame) -> dict:
 
     annotated = df.copy()
     annotated["_poison_score"] = display
-    annotated["_poison_flag"]  = flags
+    annotated["_poison_flag"] = flags
 
     return {
         "n_rows": n,
@@ -654,8 +654,8 @@ def _stream_status() -> dict:
     n = len(_stream.buffer)
     n_flagged = sum(_stream.flags) if _stream.flags else 0
     return {
-        "status":      "active"     if _stream.initialized else
-                       "warming_up" if n > 0                else "empty",
+        "status": "active" if _stream.initialized else
+                       "warming_up" if n > 0 else "empty",
         "n_samples": n,
         "n_flagged": n_flagged,
         "n_clean": n - n_flagged,
