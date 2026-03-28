@@ -512,10 +512,10 @@ class RPFExtractor:
                  k2: int, D_all: np.ndarray, I_all: np.ndarray):
         n = len(X)
         k = min(k2, D_all.shape[1])
-        I_neighbors = I_all[:, :k]
+        I = I_all[:, :k]
         D = D_all[:, :k]
 
-        I_flat = I_neighbors.ravel()
+        I_flat = I.ravel()
         rev_counts = np.bincount(I_flat, minlength=n).astype(np.float32)
 
         rev_mean = rev_counts.mean() + 1e-8
