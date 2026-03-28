@@ -94,8 +94,9 @@ def ablation_study(meta, X_tr, y_tr, attacks, rate=0.10, n_trials=3, y_cont=None
                     pred_m[np.argsort(sc_m)[-k:]] = 1
                     f1_m   = f1_score(ytrue, pred_m, zero_division=0)
                     drops[block].append(f1_full - f1_m)
-            except Exception:
-                pass
+            except Exception as exc:
+                print(f"[ablation_study] Warning: attack {atk} trial {trial} failed: {exc}")
+                continue
     return {b: float(np.mean(v)) if v else 0. for b, v in drops.items()}
 
 # ── Consistent style ─────────────────────────────────────────────────
@@ -132,10 +133,7 @@ def _get_color(d):
     return COLORS.get(d, "#888888")
 
 
-# =====================================================================
 #  FIGURE 1 — F1 Heatmap: Attacks × Detectors (per dataset or grand)
-# =====================================================================
-
 def plot_f1_heatmap(grand_results, eval_ds, mode_key="unknown"):
     """
     One heatmap per dataset: rows = attacks, cols = detectors, cell = F1.
@@ -295,8 +293,9 @@ def plot_ablation(meta_det, eval_ds):
             for b in RPFExtractor.BLOCK_NAMES:
                 if b in abl:
                     block_drops_all[b].append(abl[b])
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"[plot_ablation] Warning: dataset {ds_key} failed: {exc}")
+            continue
 
     blocks  = list(RPFExtractor.BLOCK_NAMES.keys())
     descs   = [RPFExtractor.BLOCK_NAMES[b][0] for b in blocks]
@@ -593,8 +592,9 @@ def plot_feature_importance(meta_det, eval_ds):
             imp = meta_det.feature_importance(dsinfo["X_tr"], dsinfo["y_tr"],
                                                y_cont=dsinfo.get("y_cont"))
             all_imp.append(imp)
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"[plot_feature_importance] Warning: dataset {ds_key} failed: {exc}")
+            continue
 
     if not all_imp:
         print("  [fig8] No feature importance data — skipping")
@@ -667,8 +667,9 @@ def plot_rate_calibration(meta_det, eval_ds):
                     est = estimate_contamination_rate(scores)
                     true_rates.append(rate)
                     est_rates.append(est)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    print(f"[plot_rate_calibration] Warning: attack {atk} on ds {ds_key} rate {rate} failed: {exc}")
+                    continue
 
     if not true_rates:
         print("  [fig9] No calibration data — skipping")

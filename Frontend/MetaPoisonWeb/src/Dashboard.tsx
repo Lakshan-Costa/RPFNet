@@ -105,7 +105,7 @@ async function analyzeCSV(file: File, tau: number | null, datasetHint: string) {
 }
 
 async function analyzeUCI(uci_id: number, tau: number | null) {
-  const body: any = { uci_id };
+  const body: AnalyzeUCIRequest = { uci_id };
   if (tau !== null) body.tau = tau;
 
   const res = await fetchWithFallback(`/analyze_uci`, {
@@ -119,7 +119,7 @@ async function analyzeUCI(uci_id: number, tau: number | null) {
 }
 
 async function analyzeURL(url: string, tau: number | null, datasetHint: string) {
-  const body: any = { url };
+  const body: AnalyzeURLRequest = { url };
   if (tau !== null) body.tau = tau;
   if (datasetHint) body.dataset_hint = datasetHint;
 
@@ -133,7 +133,33 @@ async function analyzeURL(url: string, tau: number | null, datasetHint: string) 
   return payload;
 }
 
-const themes = {
+type AnalyzeUCIRequest = { uci_id: number; tau?: number };
+type AnalyzeURLRequest = { url: string; tau?: number; dataset_hint?: string };
+type BackendLoadResponse = {
+  tau: number;
+  tau_local?: number;
+  threshold_source?: string;
+  dataset_id?: string;
+  scores: number[];
+  flags: Array<number | boolean>;
+  invariant_violations?: string[][];
+  violation_details?: ViolationDetail[][];
+  n_rows?: number;
+};
+
+type ThemeColors = {
+  bg: string;
+  card: string;
+  text: string;
+  subtext: string;
+  accent: string;
+  border: string;
+  inputBg: string;
+  inputText: string;
+  inputBorder: string;
+};
+
+const themes: Record<"dark" | "light", ThemeColors> = {
   dark: {
     bg: "#1a1a1a",
     card: "#2a2a2a",
@@ -240,7 +266,7 @@ export default function App() {
     })();
   }, []);
 
-  function loadFromBackend(res: any) {
+  function loadFromBackend(res: BackendLoadResponse) {
     const newRows: Row[] = res.scores.map((s: number, i: number) => {
       const legacyReasons: string[] = res.invariant_violations?.[i] || [];
 
@@ -544,8 +570,8 @@ async function exportCleanDataset() {
       setStatus(statusMsg);
       announceToScreenReader(`Analysis complete: ${statusMsg}`);
 
-    } catch (ex: any) {
-      const errorMsg = ex?.message ?? "Failed";
+    } catch (error: unknown) {
+      const errorMsg = error instanceof Error ? error.message : String(error ?? "Failed");
       setErr(errorMsg);
       setStatus("Failed.");
       announceToScreenReader(`Error: ${errorMsg}`, "assertive");
@@ -619,11 +645,11 @@ async function exportCleanDataset() {
               <div style={{background: t.card, padding: 14, borderRadius: 8, textAlign: "left"}}>
                 <h3 style={{ marginTop: 0 }}>Run Detection</h3>
                 <div style={{ display: "flex", gap: 12, marginBottom: 12 }}>
-                  {["csv", "uci", "url"].map((type) => (
+                  {(["csv", "uci", "url"] as const).map((type) => (
                     <button
                       key={type}
                       onClick={() => {
-                        setSourceType(type as any);
+                        setSourceType(type);
                         setCsvFile(null);
                         setCsvUrl("");
                         setUciId("");
@@ -674,8 +700,8 @@ async function exportCleanDataset() {
                           const statusMsg = `Analyzed ${res.n_rows} rows. τ=${formatNum(res.tau, 4)} (${res.threshold_source})`;
                           setStatus(statusMsg);
                           announceToScreenReader(`Analysis complete: ${statusMsg}`);
-                        } catch (ex: any) {
-                          const errorMsg = ex?.message ?? "Failed";
+                        } catch (error: unknown) {
+                          const errorMsg = error instanceof Error ? error.message : String(error ?? "Failed");
                           setErr(errorMsg);
                           setStatus("Failed.");
                           announceToScreenReader(`Error: ${errorMsg}`, "assertive");
@@ -1091,7 +1117,7 @@ function Metric({ label, value }: { label: string; value: number }) {
   );
 }
 
-function ScoreScatter({ rows, tau, height = 260, theme }: { rows: Row[]; tau: number; height?: number, theme: any }) {
+function ScoreScatter({ rows, tau, height = 260, theme }: { rows: Row[]; tau: number; height?: number; theme: ThemeColors }) {
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
   const MAX_POINTS = 8000;
 
@@ -1212,7 +1238,7 @@ function ScoreScatter({ rows, tau, height = 260, theme }: { rows: Row[]; tau: nu
   );
 }
 
-function ScoreHistogram({ rows, tau, height = 320, theme }: { rows: Row[]; tau: number; height?: number, theme: any  }) {
+function ScoreHistogram({ rows, tau, height = 320, theme }: { rows: Row[]; tau: number; height?: number; theme: ThemeColors }) {
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
