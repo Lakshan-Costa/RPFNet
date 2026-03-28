@@ -23,11 +23,11 @@ def _otsu_rate(scores: np.ndarray) -> float:
 
     # Efficient Otsu: compute running stats
     cum_sum = np.cumsum(sorted_s)
-    cum_sq  = np.cumsum(sorted_s ** 2)
-    total   = cum_sum[-1]
+    cum_sq = np.cumsum(sorted_s ** 2)
+    total = cum_sum[-1]
 
     best_var = np.inf
-    best_k   = n // 2
+    best_k = n // 2
 
     # Only search in plausible range [50%, 98%] of sorted scores
     lo_idx = max(1, int(n * 0.50))
@@ -49,7 +49,7 @@ def _otsu_rate(scores: np.ndarray) -> float:
 
         if within_var < best_var:
             best_var = within_var
-            best_k   = k
+            best_k = k
 
     return (n - best_k) / n
 
@@ -69,8 +69,8 @@ def score_distribution_features(scores: np.ndarray) -> np.ndarray:
     s = np.sort(scores.astype(np.float64))
     n = len(s)
 
-    pcts    = np.percentile(s, [50, 60, 70, 75, 80, 85, 90, 92, 95, 97, 99])
-    diffs   = np.diff(s[max(0, n // 2):])
+    pcts = np.percentile(s, [50, 60, 70, 75, 80, 85, 90, 92, 95, 97, 99])
+    diffs = np.diff(s[max(0, n // 2):])
     top_gap = float(diffs.max()) if len(diffs) > 0 else 0.0
 
     return np.array([
@@ -104,7 +104,7 @@ def estimate_contamination_rate(scores: np.ndarray, lo: float = 0.01, hi: float 
     n = len(scores)
     sorted_s = np.sort(scores)
     estimates = []
-    weights   = []
+    weights = []
 
     bc = _bimodality_coefficient(scores)
 
@@ -119,8 +119,8 @@ def estimate_contamination_rate(scores: np.ndarray, lo: float = 0.01, hi: float 
         estimates.append(est_gmm)
         # GMM is more reliable when scores are bimodal
         weights.append(2.0 if bc > 0.555 else 0.5)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[RateEstimator] GaussianMixture estimation failed: {type(e).__name__}: {e}")
 
     # Score-gap
     start = max(1, int(n * 0.40))
@@ -138,8 +138,8 @@ def estimate_contamination_rate(scores: np.ndarray, lo: float = 0.01, hi: float 
     weights.append(2.0)  # Otsu is generally well-calibrated
 
     # Excess-mass
-    half  = sorted_s[:max(10, n // 2)]
-    mu    = float(half.mean())
+    half = sorted_s[:max(10, n // 2)]
+    mu = float(half.mean())
     sigma = float(half.std()) + 1e-8
     est_em = float((scores > mu + 2.0 * sigma).mean())
     estimates.append(est_em)
@@ -151,7 +151,7 @@ def estimate_contamination_rate(scores: np.ndarray, lo: float = 0.01, hi: float 
     # Weighted median
     # When bimodality is weak, shrink toward conservative estimate
     estimates = np.array(estimates)
-    weights   = np.array(weights)
+    weights = np.array(weights)
 
     if bc < 0.40:
         # Weak separation: poison signal is subtle, shrink estimates down
@@ -162,7 +162,7 @@ def estimate_contamination_rate(scores: np.ndarray, lo: float = 0.01, hi: float 
     # Weighted median
     sorted_idx = np.argsort(estimates)
     cum_w = np.cumsum(weights[sorted_idx])
-    mid   = cum_w[-1] / 2.0
+    mid = cum_w[-1] / 2.0
     median_idx = np.searchsorted(cum_w, mid)
     rate = float(estimates[sorted_idx[min(median_idx, len(estimates) - 1)]])
 

@@ -26,7 +26,7 @@ except ImportError:
 def _split_scale(X, y, seed=42):
     Xtr, Xte, ytr, yte = train_test_split(
         X, y, test_size=0.2, random_state=seed, stratify=y)
-    sc  = StandardScaler()
+    sc = StandardScaler()
     Xtr = sc.fit_transform(Xtr).astype(np.float32)
     Xte = sc.transform(Xte).astype(np.float32)
     return Xtr, Xte, ytr, yte, sc
@@ -36,7 +36,7 @@ def _split_scale_reg(X, y, seed=42):
     """Split + scale for regression (no stratify)."""
     Xtr, Xte, ytr, yte = train_test_split(
         X, y, test_size=0.2, random_state=seed)
-    sc  = StandardScaler()
+    sc = StandardScaler()
     Xtr = sc.fit_transform(Xtr).astype(np.float32)
     Xte = sc.transform(Xte).astype(np.float32)
     # Also scale targets for regression
@@ -295,12 +295,15 @@ def load_builtin(name):
         df = pd.get_dummies(df, drop_first=True)
         X_full = df.values.astype(np.float32)
         rng_sub = np.random.default_rng(42)
-        c0 = np.where(y_full==0)[0]; c1 = np.where(y_full==1)[0]
-        n0 = min(3750, len(c0)); n1 = min(1250, len(c1))
+        c0 = np.where(y_full==0)[0]
+        c1 = np.where(y_full==1)[0]
+        n0 = min(3750, len(c0))
+        n1 = min(1250, len(c1))
         idx = np.concatenate([rng_sub.choice(c0, n0, replace=False),
                                rng_sub.choice(c1, n1, replace=False)])
         rng_sub.shuffle(idx)
-        X = X_full[idx]; y = y_full[idx]
+        X = X_full[idx]
+        y = y_full[idx]
         desc = f"Adult income (mixed, n={len(X)}, {X.shape[1]} feat)"
     elif name == "credit_g":
         bundle = fetch_openml(data_id=31, as_frame=True, parser='auto')
@@ -385,15 +388,16 @@ def load_csv(path, target_col=None):
         for cand in ["loan_status","Loan_Status","deposit","default","Default",
                      "label","target","y","class","outcome"]:
             if cand in df.columns:
-                target_col = cand; break
+                target_col = cand
+                break
         if target_col is None:
             target_col = df.columns[-1]
     print(f"        Target: '{target_col}'")
     ys = df[target_col].copy()
     if ys.dtype == object or str(ys.dtype) == "category":
         pos = {"yes","y","1","true","paid","fully paid","current","no default"}
-        yb  = ys.astype(str).str.strip().str.lower().isin(pos)
-        ys  = yb.astype(int).values
+        yb = ys.astype(str).str.strip().str.lower().isin(pos)
+        ys = yb.astype(int).values
     else:
         u = np.unique(ys.dropna())
         ys = (ys == u[-1]).astype(int).values if len(u) == 2 else \
@@ -409,11 +413,11 @@ def load_csv(path, target_col=None):
     for c in Xdf.select_dtypes(exclude="number").columns:
         Xdf[c] = Xdf[c].fillna("missing")
     Xdf = pd.get_dummies(Xdf)
-    X   = Xdf.values.astype(np.float32)
+    X = Xdf.values.astype(np.float32)
     Xtr, Xte, ytr, yte = train_test_split(X, ys, test_size=0.2,
                                            random_state=42, stratify=ys)
-    sc  = StandardScaler()
+    sc = StandardScaler()
     Xtr = sc.fit_transform(Xtr).astype(np.float32)
     Xte = sc.transform(Xte).astype(np.float32)
-    print(f"        Features: {X.shape[1]}  Train: {Xtr.shape}  Balance: {ytr.mean():.2f}")
+    print(f" Features: {X.shape[1]}  Train: {Xtr.shape}  Balance: {ytr.mean():.2f}")
     return Xtr, Xte, ytr, yte, list(Xdf.columns), sc, False, None
