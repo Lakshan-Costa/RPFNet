@@ -26,16 +26,24 @@ def _resolve_bundled_model() -> str:
         with _pkg_resources.as_file(ref) as p:
             if os.path.exists(str(p)):
                 return str(p)
-    except Exception:
-        pass
+    except (FileNotFoundError, OSError, ImportError, ModuleNotFoundError) as e:
+        warnings.warn(
+            f"[rpfnet] _resolve_bundled_model pkg_resources pathing failed: {e}",
+            UserWarning,
+            stacklevel=2,
+        )
 
     try:
         import pkg_resources as _pr
         path = _pr.resource_filename("RPFNet", "RPFNet_universal.pt")
         if os.path.exists(path):
             return path
-    except Exception:
-        pass
+    except (ImportError, FileNotFoundError, OSError) as e:
+        warnings.warn(
+            f"[rpfnet] _resolve_bundled_model pkg_resources.resource_filename failed: {e}",
+            UserWarning,
+            stacklevel=2,
+        )
 
     return local
 
@@ -333,8 +341,12 @@ def _is_bimodal(scores: np.ndarray) -> bool:
                     and counts[i + 1] > counts[i] and counts[i + 2] > counts[i]):
                 signals += 1
                 break
-    except Exception:
-        pass
+    except (ValueError, TypeError) as e:
+        warnings.warn(
+            f"[rpfnet] _is_bimodal histogram-based bimodality check failed: {e}",
+            UserWarning,
+            stacklevel=2,
+        )
 
     return signals >= 2
 
