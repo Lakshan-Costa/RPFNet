@@ -93,14 +93,22 @@ function formatPct(x: number) { return `${(x * 100).toFixed(2)}%`; }
 function formatNum(x: number, d = 3) { return Number.isFinite(x) ? x.toFixed(d) : "-"; }
 
 async function analyzeCSV(file: File, tau: number | null, datasetHint: string) {
+  if (!file.name.toLowerCase().endsWith(".csv")) {
+    throw new Error("Invalid file format: please upload a CSV file.");
+  }
+
   const form = new FormData();
   form.append("file", file);
   if (tau !== null) form.append("tau", String(tau));
   if (datasetHint) form.append("dataset_hint", datasetHint);
 
   const res = await fetchWithFallback(`/analyze_csv`, { method: "POST", body: form });
+  if (!res.ok) {
+    const payload = await res.json().catch(() => ({}));
+    throw new Error(payload?.error || "Analyze CSV failed: invalid file or server error");
+  }
+
   const payload = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(payload?.error || "Analyze CSV failed");
   return payload;
 }
 
