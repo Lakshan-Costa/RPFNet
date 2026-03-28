@@ -693,9 +693,9 @@ def analyze_stream():
 
 @app.route("/export_clean", methods=["POST"])
 def export_clean():
-    body       = request.get_json(silent=True) or {}
+    body = request.get_json(silent=True) or {}
     dataset_id = body.get("dataset_id")
-    clean_ids  = body.get("clean_ids", [])
+    clean_ids = body.get("clean_ids", [])
 
     if not dataset_id:
         return jsonify({"error": "dataset_id is required"}), 400
@@ -709,9 +709,9 @@ def export_clean():
     if not valid_ids:
         return jsonify({"error": "No valid row indices in clean_ids"}), 400
 
-    clean_df  = df.iloc[valid_ids].reset_index(drop=True)
+    clean_df = df.iloc[valid_ids].reset_index(drop=True)
     csv_bytes = clean_df.to_csv(index=False).encode("utf-8")
-    buf       = io.BytesIO(csv_bytes)
+    buf = io.BytesIO(csv_bytes)
     buf.seek(0)
 
     return send_file(

@@ -248,7 +248,7 @@ def plot_rate_comparison(grand_results, mode_key="unknown"):
     for i, d in enumerate(all_dets):
         means = [np.mean(rate_det_f1[r][d]) if rate_det_f1[r][d] else 0
                  for r in rates_seen]
-        stds  = [np.std(rate_det_f1[r][d])  if rate_det_f1[r][d] else 0
+        stds = [np.std(rate_det_f1[r][d]) if rate_det_f1[r][d] else 0
                  for r in rates_seen]
         ax.bar(x + i * width - 0.4 + width / 2, means, width,
                yerr=stds, label=d, color=_get_color(d),
@@ -382,9 +382,9 @@ def plot_roc_curves(meta_det, hybrid_det, eval_ds):
             combined, meta_s, iso_s = hybrid_det.score(Xp, yp, y_cont=y_cont)
 
             for label, scores, color, ls in [
-                ("Hybrid", combined, COLORS["Hybrid"],       "-"),
-                ("MetaPoisonV3", meta_s,   COLORS["MetaPoisonV3"], "--"),
-                ("IsoForest", iso_s,    COLORS["IsoForest"],    ":"),
+                ("Hybrid", combined, COLORS["Hybrid"], "-"),
+                ("MetaPoisonV3", meta_s, COLORS["MetaPoisonV3"], "--"),
+                ("IsoForest", iso_s, COLORS["IsoForest"], ":"),
             ]:
                 fpr, tpr, _ = roc_curve(ytrue, scores)
                 roc_auc_val = auc(fpr, tpr)
@@ -499,10 +499,10 @@ def plot_flip_vs_noflip(grand_results, mode_key="unknown"):
     width = 0.35
 
     fig, ax = plt.subplots(figsize=(max(7, len(all_dets) * 0.9), 4.5))
-    means_f = [np.mean(flip_vals[d])   if flip_vals[d]   else 0 for d in all_dets]
+    means_f = [np.mean(flip_vals[d]) if flip_vals[d] else 0 for d in all_dets]
     means_nf = [np.mean(noflip_vals[d]) if noflip_vals[d] else 0 for d in all_dets]
 
-    ax.bar(x - width / 2, means_f,  width, label="Label-flip attacks",
+    ax.bar(x - width / 2, means_f, width, label="Label-flip attacks",
            color="#3B82F6", edgecolor="white")
     ax.bar(x + width / 2, means_nf, width, label="No-flip attacks (harder)",
            color="#EF4444", edgecolor="white")
@@ -556,7 +556,7 @@ def plot_zeroshot_vs_seen(grand_results, eval_ds, mode_key="unknown"):
 
     fig, ax = plt.subplots(figsize=(max(7, len(all_dets) * 0.9), 4.5))
     means_s = [np.mean(seen_vals[d]) if seen_vals[d] else 0 for d in all_dets]
-    means_z = [np.mean(zs_vals[d])   if zs_vals[d]   else 0 for d in all_dets]
+    means_z = [np.mean(zs_vals[d]) if zs_vals[d] else 0 for d in all_dets]
 
     ax.bar(x - width / 2, means_s, width, label="Seen (meta-trained)",
            color="#8B5CF6", edgecolor="white")
@@ -676,7 +676,7 @@ def plot_rate_calibration(meta_det, eval_ds):
         return
 
     true_rates = np.array(true_rates)
-    est_rates  = np.array(est_rates)
+    est_rates = np.array(est_rates)
 
     fig, ax = plt.subplots(figsize=(5, 5))
     ax.scatter(true_rates + np.random.normal(0, 0.002, len(true_rates)),
