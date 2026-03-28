@@ -1,0 +1,295 @@
+{
+  "coverage_rate": 1.0,
+  "n_total": 87,
+  "n_covered": 87,
+  "attack_coverage": {
+    "label_flip": {
+      "coverage": 1.0,
+      "n_trials": 10
+    },
+    "clean_label": {
+      "coverage": 1.0,
+      "n_trials": 19
+    },
+    "feat_perturb": {
+      "coverage": 1.0,
+      "n_trials": 22
+    },
+    "repr_inversion": {
+      "coverage": 1.0,
+      "n_trials": 10
+    },
+    "boundary_flip": {
+      "coverage": 1.0,
+      "n_trials": 13
+    },
+    "backdoor": {
+      "coverage": 1.0,
+      "n_trials": 12
+    },
+    "dist_shift": {
+      "coverage": 1.0,
+      "n_trials": 1
+    }
+  },
+  "attack_invariant_matrix": {
+    "label_flip": {
+      "I1: Neighborhood consistency": {
+        "hit_rate": 0.5,
+        "n_trials": 10
+      },
+      "I2: Geometric coherence": {
+        "hit_rate": 0.8,
+        "n_trials": 10
+      },
+      "I3: Influence boundedness": {
+        "hit_rate": 1.0,
+        "n_trials": 10
+      },
+      "I4: Structural stability": {
+        "hit_rate": 1.0,
+        "n_trials": 10
+      },
+      "I5: Scale consistency": {
+        "hit_rate": 0.1,
+        "n_trials": 10
+      }
+    },
+    "clean_label": {
+      "I1: Neighborhood consistency": {
+        "hit_rate": 0.0,
+        "n_trials": 19
+      },
+      "I2: Geometric coherence": {
+        "hit_rate": 0.0,
+        "n_trials": 19
+      },
+      "I3: Influence boundedness": {
+        "hit_rate": 0.3157894736842105,
+        "n_trials": 19
+      },
+      "I4: Structural stability": {
+        "hit_rate": 0.0,
+        "n_trials": 19
+      },
+      "I5: Scale consistency": {
+        "hit_rate": 1.0,
+        "n_trials": 19
+      }
+    },
+    "feat_perturb": {
+      "I1: Neighborhood consistency": {
+        "hit_rate": 0.18181818181818182,
+        "n_trials": 22
+      },
+      "I2: Geometric coherence": {
+        "hit_rate": 0.045454545454545456,
+        "n_trials": 22
+      },
+      "I3: Influence boundedness": {
+        "hit_rate": 1.0,
+        "n_trials": 22
+      },
+      "I4: Structural stability": {
+        "hit_rate": 0.3181818181818182,
+        "n_trials": 22
+      },
+      "I5: Scale consistency": {
+        "hit_rate": 1.0,
+        "n_trials": 22
+      }
+    },
+    "repr_inversion": {
+      "I1: Neighborhood consistency": {
+        "hit_rate": 0.7,
+        "n_trials": 10
+      },
+      "I2: Geometric coherence": {
+        "hit_rate": 1.0,
+        "n_trials": 10
+      },
+      "I3: Influence boundedness": {
+        "hit_rate": 0.7,
+        "n_trials": 10
+      },
+      "I4: Structural stability": {
+        "hit_rate": 0.7,
+        "n_trials": 10
+      },
+      "I5: Scale consistency": {
+        "hit_rate": 0.0,
+        "n_trials": 10
+      }
+    },
+    "boundary_flip": {
+      "I1: Neighborhood consistency": {
+        "hit_rate": 0.6153846153846154,
+        "n_trials": 13
+      },
+      "I2: Geometric coherence": {
+        "hit_rate": 1.0,
+        "n_trials": 13
+      },
+      "I3: Influence boundedness": {
+        "hit_rate": 0.8461538461538461,
+        "n_trials": 13
+      },
+      "I4: Structural stability": {
+        "hit_rate": 1.0,
+        "n_trials": 13
+      },
+      "I5: Scale consistency": {
+        "hit_rate": 0.07692307692307693,
+        "n_trials": 13
+      }
+    },
+    "backdoor": {
+      "I1: Neighborhood consistency": {
+        "hit_rate": 0.0,
+        "n_trials": 12
+      },
+      "I2: Geometric coherence": {
+        "hit_rate": 0.0,
+        "n_trials": 12
+      },
+      "I3: Influence boundedness": {
+        "hit_rate": 0.5,
+        "n_trials": 12
+      },
+      "I4: Structural stability": {
+        "hit_rate": 0.0,
+        "n_trials": 12
+      },
+      "I5: Scale consistency": {
+        "hit_rate": 1.0,
+        "n_trials": 12
+      }
+    },
+    "dist_shift": {
+      "I1: Neighborhood consistency": {
+        "hit_rate": 0.0,
+        "n_trials": 1
+      },
+      "I2: Geometric coherence": {
+        "hit_rate": 0.0,
+        "n_trials": 1
+      },
+      "I3: Influence boundedness": {
+        "hit_rate": 1.0,
+        "n_trials": 1
+      },
+      "I4: Structural stability": {
+        "hit_rate": 0.0,
+        "n_trials": 1
+      },
+      "I5: Scale consistency": {
+        "hit_rate": 1.0,
+        "n_trials": 1
+      }
+    }
+  },
+  "complementarity": {
+    "I1: Neighborhood consistency": {
+      "total_catches": 24,
+      "exclusive_catches": 0,
+      "primary_for": [
+        [
+          "label_flip",
+          0.5
+        ],
+        [
+          "boundary_flip",
+          0.7692307692307693
+        ]
+      ],
+      "is_necessary": true,
+      "necessity_reason": "primary"
+    },
+    "I2: Geometric coherence": {
+      "total_catches": 32,
+      "exclusive_catches": 1,
+      "primary_for": [
+        [
+          "label_flip",
+          0.5
+        ],
+        [
+          "repr_inversion",
+          1.0
+        ]
+      ],
+      "is_necessary": true,
+      "necessity_reason": "exclusive"
+    },
+    "I3: Influence boundedness": {
+      "total_catches": 63,
+      "exclusive_catches": 0,
+      "primary_for": [
+        [
+          "backdoor",
+          0.5
+        ]
+      ],
+      "is_necessary": true,
+      "necessity_reason": "primary"
+    },
+    "I4: Structural stability": {
+      "total_catches": 37,
+      "exclusive_catches": 0,
+      "primary_for": [],
+      "is_necessary": false,
+      "necessity_reason": "redundant"
+    },
+    "I5: Scale consistency": {
+      "total_catches": 56,
+      "exclusive_catches": 19,
+      "primary_for": [
+        [
+          "clean_label",
+          1.0
+        ],
+        [
+          "feat_perturb",
+          0.9545454545454546
+        ],
+        [
+          "backdoor",
+          0.5
+        ],
+        [
+          "dist_shift",
+          1.0
+        ]
+      ],
+      "is_necessary": true,
+      "necessity_reason": "exclusive"
+    }
+  },
+  "transferability": {
+    "I1: Neighborhood consistency": {
+      "mean_ks": 0.002467456144268807,
+      "max_ks": 0.007041400534992914,
+      "std_ks": 0.0025021672663261144
+    },
+    "I2: Geometric coherence": {
+      "mean_ks": 0.002467456144268807,
+      "max_ks": 0.007041400534992914,
+      "std_ks": 0.0025021672663261144
+    },
+    "I3: Influence boundedness": {
+      "mean_ks": 0.002467456144268807,
+      "max_ks": 0.007041400534992914,
+      "std_ks": 0.0025021672663261144
+    },
+    "I4: Structural stability": {
+      "mean_ks": 0.002467456144268807,
+      "max_ks": 0.007041400534992914,
+      "std_ks": 0.0025021672663261144
+    },
+    "I5: Scale consistency": {
+      "mean_ks": 0.002467456144268807,
+      "max_ks": 0.007041400534992914,
+      "std_ks": 0.0025021672663261144
+    }
+  }
+}
