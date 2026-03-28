@@ -1,7 +1,6 @@
 
 import warnings
 warnings.filterwarnings("ignore")
-
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression

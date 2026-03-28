@@ -468,7 +468,7 @@ def fig_invariant_family_heatmap(ablation_results,
             ax.add_patch(rect)
 
     ax.text(0.98, -0.08,
-            "Green border = most important invariant for that attack family",
+            "",
             transform=ax.transAxes, fontsize=7.5, ha="right",
             color="#1D9E75", style="italic")
 
