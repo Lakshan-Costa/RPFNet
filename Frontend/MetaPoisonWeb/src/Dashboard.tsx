@@ -1120,6 +1120,7 @@ function Metric({ label, value }: { label: string; value: number }) {
 function ScoreScatter({ rows, tau, height = 260, theme }: { rows: Row[]; tau: number; height?: number; theme: ThemeColors }) {
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
   const MAX_POINTS = 8000;
+  const isDarkMode = theme === themes.dark;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -1203,8 +1204,9 @@ function ScoreScatter({ rows, tau, height = 260, theme }: { rows: Row[]; tau: nu
       ctx.fillText(`τ=${tau.toFixed(2)}`, margin.l + 6, Math.max(margin.t + 12, yTau - 6));
     }
 
-    const cleanPointColor = theme === themes.dark ? "rgba(78,205,196,0.35)" : "rgba(31,122,224,0.35)";
-    const flaggedPointColor = theme === themes.dark ? "rgba(255,107,107,0.9)" : "rgba(255,75,75,0.9)";
+    const isDarkMode = theme === themes.dark;
+    const cleanPointColor = isDarkMode ? "rgba(78,205,196,0.35)" : "rgba(31,122,224,0.35)";
+    const flaggedPointColor = isDarkMode ? "rgba(255,107,107,0.9)" : "rgba(255,75,75,0.9)";
 
     for (const p of sampled) {
       const x = xToPx(p.x);
@@ -1228,12 +1230,12 @@ function ScoreScatter({ rows, tau, height = 260, theme }: { rows: Row[]; tau: nu
     ctx.rotate(-Math.PI / 2);
     ctx.fillText("score", 0, 0);
     ctx.restore();
-  }, [rows, tau, height]);
+  }, [rows, tau, height, theme]);
 
   return (
     <div style={{ width: "100%" }} role="figure" aria-label="Scatter plot of anomaly scores">
       <canvas ref={canvasRef} role="img" aria-label="Scatter plot showing anomaly scores by row index. Larger brighter points are flagged as suspicious." />
-      <div style={{ fontSize: 14, opacity: 0.75, marginTop: 6, padding: "8px 12px", backgroundColor: theme === themes.dark ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.05)", borderRadius: "4px" }}>
+      <div style={{ fontSize: 14, opacity: 0.75, marginTop: 6, padding: "8px 12px", backgroundColor: isDarkMode ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.05)", borderRadius: "4px" }}>
         <strong>How to read this chart:</strong> X-axis shows row index, Y-axis shows anomaly score. 
         The horizontal dashed line represents the current threshold (τ). Brighter, larger points above the line are flagged as suspicious only if they also violate an invariant.
       </div>
@@ -1243,6 +1245,7 @@ function ScoreScatter({ rows, tau, height = 260, theme }: { rows: Row[]; tau: nu
 
 function ScoreHistogram({ rows, tau, height = 320, theme }: { rows: Row[]; tau: number; height?: number; theme: ThemeColors }) {
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
+  const isDarkMode = theme === themes.dark;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -1350,12 +1353,12 @@ function ScoreHistogram({ rows, tau, height = 320, theme }: { rows: Row[]; tau: 
     ctx.rotate(-Math.PI / 2);
     ctx.fillText("count", 0, 0);
     ctx.restore();
-  }, [rows, tau, height]);
+  }, [rows, tau, height, theme]);
 
   return (
     <div style={{ width: "100%" }} role="figure" aria-label="Histogram of anomaly score distribution">
       <canvas ref={canvasRef} role="img" aria-label="Histogram showing distribution of anomaly scores. Blue bars are below threshold (clean), red bars are above threshold (flagged)." />
-      <div style={{ fontSize: 14, opacity: 0.75, marginTop: 6, padding: "8px 12px", backgroundColor: theme === themes.dark ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.05)", borderRadius: "4px" }}>
+      <div style={{ fontSize: 14, opacity: 0.75, marginTop: 6, padding: "8px 12px", backgroundColor: isDarkMode ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.05)", borderRadius: "4px" }}>
         <strong>How to read this chart:</strong> Blue bars represent scores below the threshold (clean rows), 
         red bars represent scores at or above the threshold (flagged rows). The dashed golden line shows the current threshold.
       </div>
