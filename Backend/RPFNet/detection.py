@@ -134,10 +134,10 @@ def get_rpf_cached(extractor, X, y, key, y_cont=None):
 
 #Utils
 def focal_loss(logits, targets, gamma: float = 2.0, pos_weight: float = 4.0):
-    pw  = torch.tensor(pos_weight, device=logits.device, dtype=logits.dtype)
+    pw = torch.tensor(pos_weight, device=logits.device, dtype=logits.dtype)
     bce = F.binary_cross_entropy_with_logits(
         logits, targets, pos_weight=pw, reduction="none")
-    pt   = torch.exp(-F.binary_cross_entropy_with_logits(
+    pt = torch.exp(-F.binary_cross_entropy_with_logits(
         logits, targets, reduction="none"))
     return ((1 - pt) ** gamma * bce).mean()
 #  RPFNET (input_dim=61)
@@ -166,16 +166,16 @@ class RPFNetPoisonDetector:
 
     def __init__(self, device: str = "cpu", epochs: int = 400,
                  batch_size: int = 512, lr: float = 1e-3):
-        self.device     = torch.device(device)
-        self.epochs     = epochs
+        self.device = torch.device(device)
+        self.epochs = epochs
         self.batch_size = batch_size
-        self.lr         = lr
-        self.extractor  = RPFExtractor(k_small=RPF_K_SMALL,
+        self.lr = lr
+        self.extractor = RPFExtractor(k_small=RPF_K_SMALL,
                                         k_large=RPF_K_LARGE,
                                         cv_folds=RPF_CV_FOLDS)
-        self.net        = RPFNetPoisonNet(input_dim=RPFExtractor.DIM).to(self.device)
-        self.rate_head  = RateEstimatorHead().to(self.device)
-        self._fitted    = False
+        self.net = RPFNetPoisonNet(input_dim=RPFExtractor.DIM).to(self.device)
+        self.rate_head = RateEstimatorHead().to(self.device)
+        self._fitted = False
         self._threshold = 0.5
 
     def RPFNet_fit(self, datasets: dict, attacks=None, rates=None,
@@ -184,7 +184,7 @@ class RPFNetPoisonDetector:
         datasets: dict of name → (X, y) OR name → (X, y, y_cont)
         """
         if attacks is None: attacks = RPFNet_TRAIN_ATTACKS
-        if rates   is None: rates   = RPFNet_TRAIN_RATES
+        if rates is None: rates = RPFNet_TRAIN_RATES
 
         n_combos = len(datasets) * len(attacks) * len(rates) * seeds
         if verbose:
@@ -243,25 +243,25 @@ class RPFNetPoisonDetector:
                   f"poison frac: {y_pool.mean():.3f}  |  {elapsed:.1f}s")
             print(f"  Phase 2 — Training RPFNetPoisonNet ({self.epochs} epochs)...")
 
-        opt   = torch.optim.AdamW(self.net.parameters(),
+        opt = torch.optim.AdamW(self.net.parameters(),
                                    lr=self.lr, weight_decay=1e-4)
         sched = torch.optim.lr_scheduler.CosineAnnealingLR(
                     opt, T_max=self.epochs, eta_min=self.lr * 0.01)
-        rng   = np.random.default_rng(42)
-        n     = len(X_pool)
-        best  = float("inf")
-        hist  = []
+        rng = np.random.default_rng(42)
+        n = len(X_pool)
+        best = float("inf")
+        hist = []
 
         for ep in range(self.epochs):
-            perm    = rng.permutation(n)
+            perm = rng.permutation(n)
             ep_loss = []
             for i in range(0, n, self.batch_size):
                 idx = perm[i: i + self.batch_size]
                 if len(idx) < 2: continue
-                xb     = torch.tensor(X_pool[idx], device=self.device)
-                yb     = torch.tensor(y_pool[idx], device=self.device)
+                xb = torch.tensor(X_pool[idx], device=self.device)
+                yb = torch.tensor(y_pool[idx], device=self.device)
                 logits = self.net(xb)
-                loss   = focal_loss(logits, yb)
+                loss = focal_loss(logits, yb)
                 opt.zero_grad(); loss.backward()
                 nn.utils.clip_grad_norm_(self.net.parameters(), 1.0)
                 opt.step()
@@ -305,10 +305,10 @@ class RPFNetPoisonDetector:
                                 y_cont=y_cont)
                             if len(pidx) < 3: continue
                             cache_key = ("RPFNet", ds_name, atk, rate_val, seed)
-                            rpf   = get_rpf_cached(self.extractor, Xp, yp,
+                            rpf = get_rpf_cached(self.extractor, Xp, yp,
                                                     cache_key, y_cont=y_cont)
-                            s     = self._score_rpf(rpf)
-                            s_rk  = rankdata(s).astype(np.float32) / len(s)
+                            s = self._score_rpf(rpf)
+                            s_rk = rankdata(s).astype(np.float32) / len(s)
                             feats = score_distribution_features(s_rk)
                             rate_feats.append(feats)
                             rate_targets.append(np.float32(rate_val))
@@ -326,8 +326,8 @@ class RPFNetPoisonDetector:
                 perm = rng_rh.permutation(len(Xr))
                 for i in range(0, len(Xr), 64):
                     idx = perm[i: i + 64]
-                    xb  = torch.tensor(Xr[idx], device=self.device)
-                    yb  = torch.tensor(yr[idx], device=self.device)
+                    xb = torch.tensor(Xr[idx], device=self.device)
+                    yb = torch.tensor(yr[idx], device=self.device)
                     loss = F.mse_loss(self.rate_head(xb), yb)
                     rh_opt.zero_grad(); loss.backward(); rh_opt.step()
 
@@ -376,23 +376,23 @@ class RPFNetPoisonDetector:
 
     def predict_adaptive(self, X, y, assumed_rate=ASSUMED_RATE, y_cont=None):
         scores, _ = self.score(X, y, y_cont=y_cont)
-        est_rate  = estimate_contamination_rate(scores)
-        n         = len(scores)
-        k         = max(1, int(n * est_rate))
-        pred      = np.zeros(n, dtype=int)
+        est_rate = estimate_contamination_rate(scores)
+        n = len(scores)
+        k = max(1, int(n * est_rate))
+        pred = np.zeros(n, dtype=int)
         pred[np.argsort(scores)[-k:]] = 1
         return pred, scores
 
     def predict_topk(self, X, y, rate, y_cont=None):
         scores, _ = self.score(X, y, y_cont=y_cont)
-        k    = max(1, int(len(scores) * rate))
+        k = max(1, int(len(scores) * rate))
         pred = np.zeros(len(scores), dtype=int)
         pred[np.argsort(scores)[-k:]] = 1
         return pred, scores
 
     def feature_importance(self, X, y, y_cont=None):
         rpf = self.extractor.extract(X, y, y_cont=y_cont)
-        t   = torch.tensor(rpf, dtype=torch.float32,
+        t = torch.tensor(rpf, dtype=torch.float32,
                             device=self.device, requires_grad=True)
         self.net.eval()
         self.net(t).sum().backward()
@@ -406,14 +406,14 @@ class RPFNetPoisonDetector:
     def save(self, path):
         os.makedirs(os.path.dirname(path) if os.path.dirname(path) else ".", exist_ok=True)
         torch.save({
-            "net":       self.net.state_dict(),
+            "net": self.net.state_dict(),
             "threshold": self._threshold,
-            "fitted":    self._fitted,
-            "k_small":   self.extractor.k_small,
-            "k_large":   self.extractor.k_large,
-            "cv_folds":  self.extractor.cv_folds,
-            "rpf_dim":   RPFExtractor.DIM,
-            "version":   4,
+            "fitted": self._fitted,
+            "k_small": self.extractor.k_small,
+            "k_large": self.extractor.k_large,
+            "cv_folds": self.extractor.cv_folds,
+            "rpf_dim": RPFExtractor.DIM,
+            "version": 4,
             "rate_head": self.rate_head.state_dict(),
         }, path)
         n = sum(p.numel() for p in self.net.parameters())
@@ -428,11 +428,11 @@ class RPFNetPoisonDetector:
                 f"{RPFExtractor.DIM}. Set FORCE_RETRAIN=True to retrain.")
         self.net = RPFNetPoisonNet(input_dim=dim).to(self.device)
         self.net.load_state_dict(ckpt["net"])
-        self._threshold          = ckpt.get("threshold", 0.5)
-        self._fitted             = ckpt.get("fitted", True)
-        self.extractor.k_small   = ckpt.get("k_small", RPF_K_SMALL)
-        self.extractor.k_large   = ckpt.get("k_large", RPF_K_LARGE)
-        self.extractor.cv_folds  = ckpt.get("cv_folds", RPF_CV_FOLDS)
+        self._threshold = ckpt.get("threshold", 0.5)
+        self._fitted = ckpt.get("fitted", True)
+        self.extractor.k_small = ckpt.get("k_small", RPF_K_SMALL)
+        self.extractor.k_large = ckpt.get("k_large", RPF_K_LARGE)
+        self.extractor.cv_folds = ckpt.get("cv_folds", RPF_CV_FOLDS)
         if "rate_head" in ckpt:
             self.rate_head = RateEstimatorHead().to(self.device)
             self.rate_head.load_state_dict(ckpt["rate_head"])
@@ -444,7 +444,7 @@ class RPFNetPoisonDetector:
 class HybridEnsembleDetector:
 
     def __init__(self, RPFNet: RPFNetPoisonDetector, fusion_w: float = 0.55):
-        self.RPFNet      = RPFNet
+        self.RPFNet = RPFNet
         self.fusion_w  = fusion_w
         self.rate_head = None
 
@@ -460,8 +460,8 @@ class HybridEnsembleDetector:
 
     def score(self, X, y, y_cont=None):
         RPFNet_s, rpf = self.RPFNet.score(X, y, y_cont=y_cont)
-        iso_s       = self._iso_scores(X)
-        combined    = self._rank_fuse(RPFNet_s, iso_s)
+        iso_s = self._iso_scores(X)
+        combined = self._rank_fuse(RPFNet_s, iso_s)
         return combined, RPFNet_s, iso_s
 
     def _estimate_rate(self, scores):
@@ -470,7 +470,7 @@ class HybridEnsembleDetector:
         if self.rate_head is not None:
             try:
                 feats = score_distribution_features(ranked)
-                t     = torch.tensor(feats, dtype=torch.float32,
+                t = torch.tensor(feats, dtype=torch.float32,
                                      device=self.RPFNet.device).unsqueeze(0)
                 with torch.no_grad():
                     rate = float(self.rate_head(t).item())
@@ -487,8 +487,8 @@ class HybridEnsembleDetector:
 
     def predict_adaptive(self, X, y, assumed_rate=ASSUMED_RATE, y_cont=None):
         combined, _, _ = self.score(X, y, y_cont=y_cont)
-        n              = len(combined)
-        est_rate       = self._estimate_rate(combined)
+        n = len(combined)
+        est_rate = self._estimate_rate(combined)
 
         vote_rates = np.clip(
             [est_rate * 0.50, est_rate * 0.75, est_rate,
@@ -498,7 +498,7 @@ class HybridEnsembleDetector:
 
         votes = np.zeros(n, dtype=np.float32)
         for vr in vote_rates:
-            k    = max(1, int(n * vr))
+            k = max(1, int(n * vr))
             mask = np.zeros(n, dtype=int)
             mask[np.argsort(combined)[-k:]] = 1
             votes += mask
@@ -508,7 +508,7 @@ class HybridEnsembleDetector:
 
     def predict_topk(self, X, y, rate, y_cont=None):
         combined, _, _ = self.score(X, y, y_cont=y_cont)
-        k    = max(1, int(len(combined) * rate))
+        k = max(1, int(len(combined) * rate))
         pred = np.zeros(len(combined), dtype=int)
         pred[np.argsort(combined)[-k:]] = 1
         return pred, combined
@@ -551,8 +551,8 @@ class HybridEnsembleDetector:
                             cache_key = ("fusion", ds_name, atk, rate, seed)
                             rpf = get_rpf_cached(self.RPFNet.extractor, Xp, yp,
                                                   cache_key, y_cont=y_cont)
-                            ms      = self.RPFNet._score_rpf(rpf)
-                            iso_s   = self._iso_scores(Xp)
+                            ms = self.RPFNet._score_rpf(rpf)
+                            iso_s = self._iso_scores(Xp)
                             RPFNet_s_list.append(ms)
                             iso_s_list.append(iso_s)
                             y_list.append(ytrue)
@@ -597,200 +597,3 @@ class HybridEnsembleDetector:
             rh = RateEstimatorHead()
             rh.load_state_dict(ckpt["rate_head"])
             self.attach_rate_head(rh)
-
-#  MAIN
-if __name__ == "__main__":
-
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    np.random.seed(42)
-    W = 82
-
-    print("=" * W)
-    print("  RPFNetPoison v3: Universal Poison Detection + Regression Support")
-    print(f"  RPF dims : {RPFExtractor.DIM}  (v4=61, +Block G Structural Echo)")
-    print(f"  Device   : {device}   Attacks: {len(ATTACKS)}   Rates: {RATES}")
-    print(f"  Model    : {RPFNet_MODEL_PATH}")
-    print(f"  RPFNet-train datasets: {len(RPFNet_TRAIN_DATASETS)} (expanded for OOD generalization)")
-    print("=" * W)
-
-    # Load RPFNet-training datasets
-    print(f"\n  RPFNet-training datasets: {RPFNet_TRAIN_DATASETS}")
-    RPFNet_data = {}
-    for bname in RPFNet_TRAIN_DATASETS:
-        try:
-            result = load_builtin(bname)
-            Xtr = result[0]
-            ytr = result[2]
-            is_reg = result[6]
-            y_cont = result[7]
-            if is_reg and y_cont is not None:
-                RPFNet_data[bname] = (Xtr, ytr, y_cont)
-            else:
-                RPFNet_data[bname] = (Xtr, ytr)
-        except Exception as e:
-            print(f"  ⚠ {bname}: {e}")
-
-    if not RPFNet_data:
-        raise RuntimeError("No RPFNet-training datasets loaded.")
-
-    print(f"\n  Successfully loaded {len(RPFNet_data)}/{len(RPFNet_TRAIN_DATASETS)} "
-          f"RPFNet-training datasets")
-
-    # Train or load
-    RPFNet_det = RPFNetPoisonDetector(device=device, epochs=RPFNet_EPOCHS,
-                                   batch_size=RPFNet_BATCH_SIZE, lr=RPFNet_LR)
-    hybrid_det = HybridEnsembleDetector(RPFNet_det)
-    fusion_path = RPFNet_MODEL_PATH.replace(".pt", "_fusion.pt")
-
-    if not FORCE_RETRAIN and os.path.exists(RPFNet_MODEL_PATH):
-        RPFNet_det.load(RPFNet_MODEL_PATH)
-        if os.path.exists(fusion_path):
-            hybrid_det.load(fusion_path)
-        else:
-            hybrid_det.calibrate_fusion_weight(RPFNet_data, verbose=True)
-    else:
-        print(f"\n  RPFNet-training on: {list(RPFNet_data.keys())}")
-        RPFNet_det.RPFNet_fit(RPFNet_data, attacks=RPFNet_TRAIN_ATTACKS,
-                          rates=RPFNet_TRAIN_RATES, seeds=RPFNet_TRAIN_SEEDS,
-                          verbose=True)
-        RPFNet_det.save(RPFNet_MODEL_PATH)
-        hybrid_det.attach_rate_head(RPFNet_det.rate_head)
-        hybrid_det.calibrate_fusion_weight(RPFNet_data, verbose=True)
-        hybrid_det.save(fusion_path)
-
-    # Build eval set
-    eval_ds = {}
-    for bname in EVAL_BUILTIN:
-        try:
-            result = load_builtin(bname)
-            Xtr = result[0]
-            ytr = result[2]
-            is_reg = result[6]
-            y_cont = result[7]
-            eval_ds[bname] = {
-                "display":       bname.replace("_", " ").title(),
-                "X_tr": Xtr, "y_tr": ytr,
-                "zero_shot":     bname not in RPFNet_TRAIN_DATASETS,
-                "is_regression": is_reg,
-                "y_cont":        y_cont,
-            }
-        except Exception as e:
-            print(f"  ⚠ {bname}: {e}")
-
-    for display, csv_path, tcol in CSV_DATASETS:
-        if os.path.exists(csv_path):
-            try:
-                result = load_csv(csv_path, tcol)
-                Xtr = result[0]
-                ytr = result[2]
-                key = display.lower().replace(" ", "_")
-                eval_ds[key] = {"display": display, "X_tr": Xtr, "y_tr": ytr,
-                                 "zero_shot": True, "is_regression": False,
-                                 "y_cont": None}
-            except Exception as e:
-                print(f"  ⚠ {display}: {e}")
-        else:
-            print(f"\n  ⚠ CSV not found: {csv_path} — skipping")
-
-    seen  = [v["display"] for v in eval_ds.values() if not v["zero_shot"]]
-    zshot = [v["display"] for v in eval_ds.values() if v["zero_shot"]]
-    regs  = [v["display"] for v in eval_ds.values() if v.get("is_regression")]
-    print(f"\n  Eval seen:       {seen}")
-    print(f"  Eval zero-shot:  {zshot} ⭐")
-    print(f"  Eval regression: {regs} 📈")
-
-    # Per-dataset loop
-    grand_results = {}
-
-    for ds_key, dsinfo in eval_ds.items():
-        ds_disp = dsinfo["display"]
-        Xtr, ytr = dsinfo["X_tr"], dsinfo["y_tr"]
-        y_cont   = dsinfo.get("y_cont")
-        is_reg   = dsinfo.get("is_regression", False)
-        zs_tag   = " ⭐ ZERO-SHOT" if dsinfo["zero_shot"] else " (seen)"
-        if is_reg: zs_tag += " 📈 REGRESSION"
-
-        print("\n" + "─" * W)
-        print(f"  DATASET: {ds_disp}{zs_tag}")
-        print("─" * W)
-
-        # Choose attacks based on dataset type
-        ds_attacks = REGRESSION_ATTACKS if is_reg else ATTACKS
-
-        ds_res = {}
-        for atk in ds_attacks:
-            if atk not in ATTACK_RPFNet:
-                continue
-            for rate in RATES:
-                label, has_flip = ATTACK_RPFNet[atk]
-                tag = "" if has_flip else " [no-flip]"
-                print(f"\n  {label} @ {rate:.0%}{tag}... ", end="", flush=True)
-                try:
-                    seed_results = []
-
-                    for s in range(EVAL_SEEDS):
-                        try:
-                            res_s = run_one(
-                                RPFNet_det, hybrid_det,
-                                Xtr, ytr, atk, rate,
-                                ds_key=f"{ds_key}_seed{s}",
-                                y_cont=y_cont
-                            )
-                            if res_s is not None:
-                                seed_results.append(res_s)
-                        except:
-                            pass
-
-                    if seed_results:
-                        res = aggregate_seed_results(seed_results)
-                    else:
-                        res = None
-
-                    ds_res[(atk, rate)] = res
-                    if res:
-                        f1h = res["unknown"]["Hybrid"]["F1_mean"]
-                        f1m = res["unknown"]["RPFNet"]["F1_mean"]
-                        f1i = res["unknown"]["IsoForest"]["F1_mean"]
-                        print(f"Hybrid={f1h:.3f}  RPFNet={f1m:.3f}  Iso={f1i:.3f}")
-                        print_result(atk, rate, res)
-                    else:
-                        print("SKIPPED")
-                except Exception as e:
-                    import traceback
-                    print(f"ERROR: {e}")
-                    traceback.print_exc()
-                    ds_res[(atk, rate)] = None
-
-        grand_results[ds_disp] = ds_res
-
-        print_summary(ds_res, "unknown",
-                      f"Mode 1 — rate UNKNOWN (assume {ASSUMED_RATE:.0%})")
-        print_summary(ds_res, "known",
-                      "Mode 2 — rate KNOWN (oracle)")
-
-        significance_test(ds_res, "unknown")
-
-        # Ablation
-        print(f"\n  ── Ablation (block masking) — {ds_disp}")
-        try:
-            abl_attacks = (["feat_perturb", "repr_inversion", "dist_shift"]
-                           if is_reg else
-                           ["label_flip", "feat_perturb", "repr_inversion", "dist_shift"])
-            abl = ablation_study(RPFNet_det, Xtr, ytr, abl_attacks,
-                                  rate=0.10, y_cont=y_cont)
-            print(f"  {'Block':>8}  {'Description':<32}  {'F1 drop':>8}  Importance")
-            print(f"  {'─'*70}")
-            for bk, (bdesc, _) in RPFExtractor.BLOCK_NAMES.items():
-                drop = abl.get(bk, 0.)
-                bar  = "█" * max(0, int(drop * 50)) if drop > 0 else "─"
-                flag = ""
-                print(f"  Block {bk:>2}  {bdesc[:32]:<32}  {drop:>+.4f}  {bar}{flag}")
-        except Exception as e:
-            print(f"  (ablation failed: {e})")
-
-    # Grand summary
-    print_grand_summary(grand_results, eval_ds)
-    generate_all_figures(grand_results, eval_ds, RPFNet_det, hybrid_det)
-
-
-
