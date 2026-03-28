@@ -82,17 +82,17 @@ def ablation_study(meta, X_tr, y_tr, attacks, rate=0.10, n_trials=3, y_cont=None
                 k     = max(1, int(len(Xp) * rate))
 
                 rpf_full  = meta.extractor.extract(Xp, yp, y_cont=y_cont)
-                sc_full   = meta._score_rpf(rpf_full)
+                sc_full = meta._score_rpf(rpf_full)
                 pred_full = np.zeros(len(Xp), dtype=int)
                 pred_full[np.argsort(sc_full)[-k:]] = 1
-                f1_full   = f1_score(ytrue, pred_full, zero_division=0)
+                f1_full = f1_score(ytrue, pred_full, zero_division=0)
 
                 for block in RPFExtractor.BLOCK_NAMES:
-                    rpf_m  = meta.ablate_block(rpf_full, block)
-                    sc_m   = meta._score_rpf(rpf_m)
+                    rpf_m = meta.ablate_block(rpf_full, block)
+                    sc_m = meta._score_rpf(rpf_m)
                     pred_m = np.zeros(len(Xp), dtype=int)
                     pred_m[np.argsort(sc_m)[-k:]] = 1
-                    f1_m   = f1_score(ytrue, pred_m, zero_division=0)
+                    f1_m = f1_score(ytrue, pred_m, zero_division=0)
                     drops[block].append(f1_full - f1_m)
             except Exception as exc:
                 print(f"[ablation_study] Warning: attack {atk} trial {trial} failed: {exc}")
@@ -101,32 +101,32 @@ def ablation_study(meta, X_tr, y_tr, attacks, rate=0.10, n_trials=3, y_cont=None
 
 # ── Consistent style ─────────────────────────────────────────────────
 plt.rcParams.update({
-    "font.family":       "serif",
-    "font.size":         10,
-    "axes.titlesize":    12,
-    "axes.labelsize":    11,
-    "xtick.labelsize":   9,
-    "ytick.labelsize":   9,
-    "legend.fontsize":   9,
-    "figure.dpi":        300,
-    "savefig.dpi":       300,
-    "savefig.bbox":      "tight",
+    "font.family": "serif",
+    "font.size": 10,
+    "axes.titlesize": 12,
+    "axes.labelsize": 11,
+    "xtick.labelsize": 9,
+    "ytick.labelsize": 9,
+    "legend.fontsize": 9,
+    "figure.dpi": 300,
+    "savefig.dpi": 300,
+    "savefig.bbox": "tight",
     "savefig.pad_inches": 0.1,
 })
 
 COLORS = {
-    "Hybrid":       "#2563EB",
+    "Hybrid": "#2563EB",
     "MetaPoisonV3": "#7C3AED",
-    "IsoForest":    "#6B7280",
-    "LOF":          "#9CA3AF",
-    "OCSVM":        "#D1D5DB",
-    "SEVER":        "#F59E0B",
-    "Influence":    "#EF4444",
-    "SpecSig":      "#10B981",
-    "PCA-KNN":      "#F97316",
-    "TRIM":         "#EC4899",
-    "iTRIM":        "#A855F7",
-    "AE-Recon":     "#06B6D4",
+    "IsoForest": "#6B7280",
+    "LOF": "#9CA3AF",
+    "OCSVM": "#D1D5DB",
+    "SEVER": "#F59E0B",
+    "Influence": "#EF4444",
+    "SpecSig": "#10B981",
+    "PCA-KNN": "#F97316",
+    "TRIM": "#EC4899",
+    "iTRIM": "#A855F7",
+    "AE-Recon": "#06B6D4",
 }
 
 def _get_color(d):
@@ -282,8 +282,8 @@ def plot_ablation(meta_det, eval_ds):
 
     for ds_key, dsinfo in eval_ds.items():
         Xtr, ytr = dsinfo["X_tr"], dsinfo["y_tr"]
-        y_cont   = dsinfo.get("y_cont")
-        is_reg   = dsinfo.get("is_regression", False)
+        y_cont = dsinfo.get("y_cont")
+        is_reg = dsinfo.get("is_regression", False)
         abl_attacks = (["feat_perturb", "repr_inversion", "dist_shift"]
                        if is_reg else
                        ["label_flip", "feat_perturb", "repr_inversion", "dist_shift"])
@@ -297,11 +297,11 @@ def plot_ablation(meta_det, eval_ds):
             print(f"[plot_ablation] Warning: dataset {ds_key} failed: {exc}")
             continue
 
-    blocks  = list(RPFExtractor.BLOCK_NAMES.keys())
-    descs   = [RPFExtractor.BLOCK_NAMES[b][0] for b in blocks]
-    means   = [np.mean(block_drops_all[b]) if block_drops_all[b] else 0
+    blocks = list(RPFExtractor.BLOCK_NAMES.keys())
+    descs = [RPFExtractor.BLOCK_NAMES[b][0] for b in blocks]
+    means = [np.mean(block_drops_all[b]) if block_drops_all[b] else 0
                for b in blocks]
-    stds    = [np.std(block_drops_all[b])  if block_drops_all[b] else 0
+    stds = [np.std(block_drops_all[b])  if block_drops_all[b] else 0
                for b in blocks]
 
     colors = ["#3B82F6", "#8B5CF6", "#EC4899", "#F59E0B", "#10B981", "#EF4444"]
@@ -351,10 +351,10 @@ def plot_roc_curves(meta_det, hybrid_det, eval_ds):
     if ds_key is None:
         ds_key = list(eval_ds.keys())[0]
 
-    dsinfo  = eval_ds[ds_key]
-    Xtr     = dsinfo["X_tr"]
-    ytr     = dsinfo["y_tr"]
-    y_cont  = dsinfo.get("y_cont")
+    dsinfo = eval_ds[ds_key]
+    Xtr = dsinfo["X_tr"]
+    ytr = dsinfo["y_tr"]
+    y_cont = dsinfo.get("y_cont")
     ds_disp = dsinfo["display"]
 
     # Pick representative attacks at 10%
@@ -382,9 +382,9 @@ def plot_roc_curves(meta_det, hybrid_det, eval_ds):
             combined, meta_s, iso_s = hybrid_det.score(Xp, yp, y_cont=y_cont)
 
             for label, scores, color, ls in [
-                ("Hybrid",       combined, COLORS["Hybrid"],       "-"),
+                ("Hybrid", combined, COLORS["Hybrid"],       "-"),
                 ("MetaPoisonV3", meta_s,   COLORS["MetaPoisonV3"], "--"),
-                ("IsoForest",    iso_s,    COLORS["IsoForest"],    ":"),
+                ("IsoForest", iso_s,    COLORS["IsoForest"],    ":"),
             ]:
                 fpr, tpr, _ = roc_curve(ytrue, scores)
                 roc_auc_val = auc(fpr, tpr)
@@ -483,7 +483,7 @@ def plot_flip_vs_noflip(grand_results, mode_key="unknown"):
                     if d not in all_dets:
                         all_dets.append(d)
 
-    flip_vals   = {d: [] for d in all_dets}
+    flip_vals = {d: [] for d in all_dets}
     noflip_vals = {d: [] for d in all_dets}
 
     for dr in grand_results.values():
@@ -499,7 +499,7 @@ def plot_flip_vs_noflip(grand_results, mode_key="unknown"):
     width = 0.35
 
     fig, ax = plt.subplots(figsize=(max(7, len(all_dets) * 0.9), 4.5))
-    means_f  = [np.mean(flip_vals[d])   if flip_vals[d]   else 0 for d in all_dets]
+    means_f = [np.mean(flip_vals[d])   if flip_vals[d]   else 0 for d in all_dets]
     means_nf = [np.mean(noflip_vals[d]) if noflip_vals[d] else 0 for d in all_dets]
 
     ax.bar(x - width / 2, means_f,  width, label="Label-flip attacks",
@@ -538,7 +538,7 @@ def plot_zeroshot_vs_seen(grand_results, eval_ds, mode_key="unknown"):
                         all_dets.append(d)
 
     seen_vals = {d: [] for d in all_dets}
-    zs_vals   = {d: [] for d in all_dets}
+    zs_vals = {d: [] for d in all_dets}
 
     zs_disps = {v["display"] for v in eval_ds.values() if v["zero_shot"]}
 
@@ -648,7 +648,7 @@ def plot_rate_calibration(meta_det, eval_ds):
     = diagonal line.
     """
     true_rates = []
-    est_rates  = []
+    est_rates = []
 
     rates_to_test = [0.01, 0.05, 0.10, 0.15, 0.20]
     test_attacks = ["label_flip", "feat_perturb", "backdoor", "repr_inversion"]
@@ -710,13 +710,13 @@ def plot_radar(grand_results, mode_key="unknown"):
     """
     # Group attacks into families
     families = {
-        "Label Flip":    ["label_flip", "boundary_flip", "targeted_class",
+        "Label Flip": ["label_flip", "boundary_flip", "targeted_class",
                           "target_flip_extreme"],
         "Feature Pert.": ["feat_perturb", "gauss_noise", "feat_dropout"],
-        "Clean-Label":   ["clean_label", "interpolation"],
-        "Backdoor":      ["backdoor", "backdoor_heavy"],
-        "Structural":    ["repr_inversion", "dist_shift", "outlier_inject"],
-        "Regression":    ["target_shift", "leverage_attack"],
+        "Clean-Label": ["clean_label", "interpolation"],
+        "Backdoor": ["backdoor", "backdoor_heavy"],
+        "Structural": ["repr_inversion", "dist_shift", "outlier_inject"],
+        "Regression": ["target_shift", "leverage_attack"],
     }
 
     # Collect per-family F1 for key detectors
@@ -875,7 +875,7 @@ def plot_score_distributions(meta_det, hybrid_det, eval_ds):
 
             combined, _, _ = hybrid_det.score(Xp, yp, y_cont=y_cont)
 
-            clean_s  = combined[ytrue == 0]
+            clean_s = combined[ytrue == 0]
             poison_s = combined[ytrue == 1]
 
             ax.hist(clean_s, bins=40, alpha=0.6, color="#3B82F6",

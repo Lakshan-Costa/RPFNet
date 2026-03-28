@@ -4,7 +4,6 @@ import importlib
 import importlib.resources as _pkg_resources
 import io
 import os
-import uuid
 import warnings
 from typing import Literal, Union
 
@@ -41,27 +40,27 @@ def _resolve_bundled_model() -> str:
     return local
 
 # Global model state
-_meta   = None
+_meta = None
 _hybrid = None
-_model_loaded         = False
+_model_loaded = False
 _model_init_attempted = False
 
 # Populated by _try_import_backend()
-_MetaPoisonDetector    = None
+_MetaPoisonDetector = None
 _HybridEnsembleDetector = None
-_RateEstimatorHead     = None
-_MetaPoisonNet         = None
-_RPFExtractor_cls      = None
+_RateEstimatorHead = None
+_MetaPoisonNet = None
+_RPFExtractor_cls = None
 
 _META_MODEL_PATH = _resolve_bundled_model()   # robust absolute path — set BEFORE backend import
-_META_EPOCHS     = 30
+_META_EPOCHS = 30
 _META_BATCH_SIZE = 512
-_META_LR         = 1e-3
-_RPF_K_SMALL     = 5
-_RPF_K_LARGE     = 15
-_RPF_CV_FOLDS    = 3
+_META_LR = 1e-3
+_RPF_K_SMALL = 5
+_RPF_K_LARGE = 15
+_RPF_CV_FOLDS = 3
 _BACKEND_AVAILABLE = False
-_LOADED_RPF_DIM    = None   # actual dim of the loaded checkpoint
+_LOADED_RPF_DIM = None   # actual dim of the loaded checkpoint
 
 # Backend import
 def _try_import_backend() -> bool:
@@ -85,7 +84,7 @@ def _try_import_backend() -> bool:
 
     # Core submodules
     try:
-        rpf_mod  = _import("RPFExtractor")
+        rpf_mod = _import("RPFExtractor")
         rate_mod = _import("RateEstimator")
         _RPFExtractor_cls  = rpf_mod.RPFExtractor
         _RateEstimatorHead = rate_mod.RateEstimatorHead
@@ -104,20 +103,20 @@ def _try_import_backend() -> bool:
         print("[rpfnet] detection.py missing RPFNetPoisonDetector")
         return False
 
-    _MetaPoisonDetector     = det.RPFNetPoisonDetector
+    _MetaPoisonDetector = det.RPFNetPoisonDetector
     _HybridEnsembleDetector = det.HybridEnsembleDetector
-    _MetaPoisonNet          = det.RPFNetPoisonDetector
+    _MetaPoisonNet = det.RPFNetPoisonDetector
 
     detected_path = getattr(det, "RPFNet_MODEL_PATH", None)
     if detected_path and os.path.isabs(detected_path) and os.path.exists(detected_path):
         _META_MODEL_PATH = detected_path
 
-    _META_EPOCHS     = getattr(det, "RPFNet_EPOCHS",     _META_EPOCHS)
+    _META_EPOCHS = getattr(det, "RPFNet_EPOCHS",     _META_EPOCHS)
     _META_BATCH_SIZE = getattr(det, "RPFNet_BATCH_SIZE", _META_BATCH_SIZE)
-    _META_LR         = getattr(det, "RPFNet_LR",         _META_LR)
+    _META_LR = getattr(det, "RPFNet_LR",         _META_LR)
     # k / cv values from detection.py if present, else keep defaults
-    _RPF_K_SMALL  = getattr(det, "RPF_K_SMALL",  _RPF_K_SMALL)
-    _RPF_K_LARGE  = getattr(det, "RPF_K_LARGE",  _RPF_K_LARGE)
+    _RPF_K_SMALL = getattr(det, "RPF_K_SMALL",  _RPF_K_SMALL)
+    _RPF_K_LARGE = getattr(det, "RPF_K_LARGE",  _RPF_K_LARGE)
     _RPF_CV_FOLDS = getattr(det, "RPF_CV_FOLDS", _RPF_CV_FOLDS)
 
     _BACKEND_AVAILABLE = True
@@ -160,8 +159,8 @@ def _load_model_compat(meta, path: str) -> bool:
     meta._fitted    = ckpt.get("fitted", True)
 
     if hasattr(meta, "extractor"):
-        meta.extractor.k_small  = ckpt.get("k_small",  _RPF_K_SMALL)
-        meta.extractor.k_large  = ckpt.get("k_large",  _RPF_K_LARGE)
+        meta.extractor.k_small = ckpt.get("k_small",  _RPF_K_SMALL)
+        meta.extractor.k_large = ckpt.get("k_large",  _RPF_K_LARGE)
         meta.extractor.cv_folds = ckpt.get("cv_folds", _RPF_CV_FOLDS)
 
     if "rate_head" in ckpt:
@@ -348,9 +347,9 @@ def _compute_tau(scores: np.ndarray) -> float:
         s = np.sort(scores)
         n = len(s)
         best_thresh = float(s[-1])
-        best_var    = 0.0
+        best_var = 0.0
         for pct in np.arange(0.50, 0.995, 0.005):
-            t     = np.percentile(s, pct * 100)
+            t = np.percentile(s, pct * 100)
             below = s[s <= t]
             above = s[s > t]
             if len(below) < 5 or len(above) < 2:
@@ -380,10 +379,10 @@ def _estimate_rate(scores: np.ndarray) -> float:
     if not _is_bimodal(scores):
         return mad_rate
 
-    tau_otsu  = _compute_tau(scores)
+    tau_otsu = _compute_tau(scores)
     otsu_rate = float((scores > tau_otsu).mean())
-    below     = scores[scores <= tau_otsu]
-    above     = scores[scores > tau_otsu]
+    below = scores[scores <= tau_otsu]
+    above = scores[scores > tau_otsu]
 
     if len(below) < 10 or len(above) < 5:
         return mad_rate
@@ -422,36 +421,36 @@ def _score_dataframe(df: pd.DataFrame) -> dict:
         raw_scores = np.asarray(raw_scores, dtype=np.float64)
 
     # Min-max normalise for display
-    s_min   = float(raw_scores.min())
+    s_min = float(raw_scores.min())
     s_range = float(raw_scores.max()) - s_min + 1e-10
     display = ((raw_scores - s_min) / s_range).astype(np.float64)
 
     # Threshold & flags
     est_rate = _estimate_rate(raw_scores)
-    tau_raw  = float(np.percentile(raw_scores, (1.0 - est_rate) * 100))
-    flags    = (raw_scores >= tau_raw).astype(int)
+    tau_raw = float(np.percentile(raw_scores, (1.0 - est_rate) * 100))
+    flags = (raw_scores >= tau_raw).astype(int)
 
-    n_flagged   = int(flags.sum())
+    n_flagged = int(flags.sum())
     flagged_idx = np.where(flags == 1)[0].tolist()
-    clean_idx   = np.where(flags == 0)[0].tolist()
+    clean_idx = np.where(flags == 0)[0].tolist()
 
     annotated = df.copy()
     annotated["_poison_score"] = display
     annotated["_poison_flag"]  = flags
 
     return {
-        "n_rows":          n,
-        "n_flagged":       n_flagged,
-        "n_clean":         n - n_flagged,
-        "pct_flagged":     round(n_flagged / n * 100, 2) if n > 0 else 0.0,
-        "estimated_rate":  round(est_rate, 4),
-        "mode":            mode,
-        "bimodal":         _is_bimodal(raw_scores),
-        "scores":          display.tolist(),
-        "flags":           flags.tolist(),
+        "n_rows": n,
+        "n_flagged": n_flagged,
+        "n_clean": n - n_flagged,
+        "pct_flagged": round(n_flagged / n * 100, 2) if n > 0 else 0.0,
+        "estimated_rate": round(est_rate, 4),
+        "mode": mode,
+        "bimodal": _is_bimodal(raw_scores),
+        "scores": display.tolist(),
+        "flags": flags.tolist(),
         "flagged_indices": flagged_idx,
-        "clean_indices":   clean_idx,
-        "dataframe":       annotated,
+        "clean_indices": clean_idx,
+        "dataframe": annotated,
         "score_stats": {
             "min": round(float(display.min()), 4),
             "p25": round(float(np.percentile(display, 25)), 4),
@@ -504,16 +503,16 @@ class _StreamState:
         self.reset()
 
     def reset(self):
-        self.buffer:      list        = []
-        self.buffer_df:   pd.DataFrame | None = None
-        self.scores:      list        = []
-        self.flags:       list        = []
-        self.scaler:      StandardScaler = StandardScaler()
-        self.model:       IsolationForest | None = None
-        self.initialized: bool        = False
-        self.window_size: int         = 500
-        self.warmup:      int         = 20
-        self.columns:     list | None = None
+        self.buffer: list = []
+        self.buffer_df: pd.DataFrame | None = None
+        self.scores: list = []
+        self.flags: list = []
+        self.scaler: StandardScaler = StandardScaler()
+        self.model: IsolationForest | None = None
+        self.initialized: bool = False
+        self.window_size: int = 500
+        self.warmup: int = 20
+        self.columns: list | None = None
 
 
 _stream = _StreamState()
@@ -523,11 +522,11 @@ def _stream_init_baseline(df: pd.DataFrame) -> dict:
     """Initialise stream with a full dataset as baseline."""
     _stream.reset()
     _stream.buffer_df = df.copy()
-    _stream.columns   = list(df.columns)
+    _stream.columns = list(df.columns)
 
     X, y, sc, Xdf = _prepare(df)
-    _stream.scaler    = StandardScaler()
-    X_scaled          = _stream.scaler.fit_transform(X)
+    _stream.scaler = StandardScaler()
+    X_scaled = _stream.scaler.fit_transform(X)
     _stream.n_features = X_scaled.shape[1]
 
     _stream.buffer.extend([row.copy() for row in X_scaled])
@@ -540,27 +539,27 @@ def _stream_init_baseline(df: pd.DataFrame) -> dict:
     tau = _compute_tau(raw)
 
     _stream.scores = [float(s) for s in raw]
-    _stream.flags  = [bool(s >= tau) for s in raw]
+    _stream.flags = [bool(s >= tau) for s in raw]
 
     n_flagged = sum(_stream.flags)
-    display   = (raw - raw.min()) / (raw.max() - raw.min() + 1e-10)
+    display = (raw - raw.min()) / (raw.max() - raw.min() + 1e-10)
 
     annotated = df.copy()
     annotated["_poison_score"] = display
-    annotated["_poison_flag"]  = [int(f) for f in _stream.flags]
+    annotated["_poison_flag"] = [int(f) for f in _stream.flags]
 
     return {
-        "status":          "initialized",
-        "n_rows":          len(df),
-        "n_flagged":       n_flagged,
-        "n_clean":         len(df) - n_flagged,
-        "pct_flagged":     round(n_flagged / len(df) * 100, 2),
-        "mode":            "stream",
-        "scores":          display.tolist(),
-        "flags":           [int(f) for f in _stream.flags],
+        "status": "initialized",
+        "n_rows": len(df),
+        "n_flagged": n_flagged,
+        "n_clean": len(df) - n_flagged,
+        "pct_flagged": round(n_flagged / len(df) * 100, 2),
+        "mode": "stream",
+        "scores": display.tolist(),
+        "flags": [int(f) for f in _stream.flags],
         "flagged_indices": [i for i, f in enumerate(_stream.flags) if f],
-        "clean_indices":   [i for i, f in enumerate(_stream.flags) if not f],
-        "dataframe":       annotated,
+        "clean_indices": [i for i, f in enumerate(_stream.flags) if not f],
+        "dataframe": annotated,
     }
 
 
@@ -591,11 +590,11 @@ def _stream_score_row(row) -> dict:
     # Warmup phase — not enough data yet
     if len(X) < _stream.warmup:
         return {
-            "status":      "warming_up",
-            "n_samples":   len(X),
-            "warmup":      _stream.warmup,
-            "score":       None,
-            "threshold":   None,
+            "status": "warming_up",
+            "n_samples": len(X),
+            "warmup": _stream.warmup,
+            "score": None,
+            "threshold": None,
             "poison_flag": None,
         }
 
@@ -610,44 +609,44 @@ def _stream_score_row(row) -> dict:
         raw = -_stream.model.score_samples(X_scaled)
         tau = _compute_tau(raw)
         _stream.scores = [float(s) for s in raw]
-        _stream.flags  = [bool(s >= tau) for s in raw]
+        _stream.flags = [bool(s >= tau) for s in raw]
 
         newest_score = float(raw[-1])
-        flag         = bool(raw[-1] >= tau)
+        flag = bool(raw[-1] >= tau)
     else:
-        raw_all      = -_stream.model.score_samples(X_scaled)
+        raw_all = -_stream.model.score_samples(X_scaled)
         newest_score = float(raw_all[-1])
-        tau          = _compute_tau(raw_all)
-        flag         = newest_score >= tau
+        tau = _compute_tau(raw_all)
+        flag = newest_score >= tau
 
         _stream.scores.append(newest_score)
         _stream.flags.append(bool(flag))
 
     n_flagged = sum(_stream.flags)
-    n_total   = len(_stream.buffer)
+    n_total = len(_stream.buffer)
 
     return {
-        "status":             "active",
-        "score":              round(newest_score, 6),
-        "threshold":          round(float(tau), 6),
-        "poison_flag":        bool(flag),
-        "n_samples":          n_total,
-        "n_flagged":          n_flagged,
-        "n_clean":            n_total - n_flagged,
+        "status": "active",
+        "score": round(newest_score, 6),
+        "threshold": round(float(tau), 6),
+        "poison_flag": bool(flag),
+        "n_samples": n_total,
+        "n_flagged": n_flagged,
+        "n_clean": n_total - n_flagged,
         "buffer_pct_flagged": round(n_flagged / n_total * 100, 2),
     }
 
 
 def _stream_status() -> dict:
     """Return current stream status without consuming any data."""
-    n         = len(_stream.buffer)
+    n = len(_stream.buffer)
     n_flagged = sum(_stream.flags) if _stream.flags else 0
     return {
         "status":      "active"     if _stream.initialized else
                        "warming_up" if n > 0                else "empty",
-        "n_samples":   n,
-        "n_flagged":   n_flagged,
-        "n_clean":     n - n_flagged,
+        "n_samples": n,
+        "n_flagged": n_flagged,
+        "n_clean": n - n_flagged,
         "initialized": _stream.initialized,
         "window_size": _stream.window_size,
     }
@@ -894,7 +893,7 @@ def stream_retrain() -> None:
     _stream.model.fit(X_scaled)
     _stream.initialized = True
 
-    raw            = -_stream.model.score_samples(X_scaled)
-    tau            = _compute_tau(raw)
+    raw = -_stream.model.score_samples(X_scaled)
+    tau = _compute_tau(raw)
     _stream.scores = [float(s) for s in raw]
-    _stream.flags  = [bool(s >= tau) for s in raw]
+    _stream.flags = [bool(s >= tau) for s in raw]
