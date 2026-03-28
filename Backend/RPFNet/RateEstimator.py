@@ -89,7 +89,7 @@ class RateEstimatorHead(nn.Module):
         self.net = nn.Sequential(
             nn.Linear(16, 32), nn.LayerNorm(32), nn.GELU(),
             nn.Linear(32, 16), nn.GELU(),
-            nn.Linear(16, 1),  nn.Sigmoid(),
+            nn.Linear(16, 1), nn.Sigmoid(),
         )
         for m in self.modules():
             if isinstance(m, nn.Linear):

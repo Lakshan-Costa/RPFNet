@@ -51,7 +51,7 @@ ATTACK_META = {
     "interpolation" : ("H. Interpolation", True),
     "targeted_class" : ("J. Targeted class", True),
     "clean_label" : ("C. Clean-label", False),
-    "backdoor" : ("D. Backdoor 4σ",  False),
+    "backdoor" : ("D. Backdoor 4σ", False),
     "null_feature" : ("I. Null feature", False),
     "feat_perturb" : ("K. Feat perturb ±4σ", False),
     "backdoor_heavy" : ("L. Backdoor heavy 10σ", False),

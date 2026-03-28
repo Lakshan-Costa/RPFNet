@@ -409,7 +409,8 @@ class RPFNetPoisonDetector:
 
     def ablate_block(self, rpf, block):
         _, sl = RPFExtractor.BLOCK_NAMES[block]
-        r = rpf.copy(); r[:, sl] = 0.0
+        r = rpf.copy()
+        r[:, sl] = 0.0
         return r
 
     def save(self, path):

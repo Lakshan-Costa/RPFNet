@@ -802,7 +802,8 @@ def synthetic_validation(n=2000, d=20, delta=3.0, sigma=1.0, k=15,
     rng = np.random.default_rng(42)
     n2 = n // 2
     mu0 = np.zeros(d)
-    mu1 = np.zeros(d); mu1[0] = delta
+    mu1 = np.zeros(d)
+    mu1[0] = delta
     X = np.vstack([
         rng.normal(mu0, sigma, (n2, d)),
         rng.normal(mu1, sigma, (n2, d))

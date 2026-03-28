@@ -56,10 +56,10 @@ def discover_block_layout():
 
 INVARIANT_TO_BLOCKS = {
     "I1: Neighbourhood consistency": ["A", "E"],
-    "I2: Geometric coherence":       ["B"],
-    "I3: Influence boundedness":     ["D", "F"],
-    "I4: Structural stability":      ["G"],
-    "I5: Scale consistency":         ["C"],
+    "I2: Geometric coherence": ["B"],
+    "I3: Influence boundedness": ["D", "F"],
+    "I4: Structural stability": ["G"],
+    "I5: Scale consistency": ["C"],
 }
 
 
