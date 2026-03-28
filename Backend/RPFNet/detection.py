@@ -217,7 +217,7 @@ class RPFNetPoisonDetector:
                                 seed=seed * 1000 + hash(atk) % 997,
                                 y_cont=y_cont)
                             if len(pidx) < 3: continue
-                            ytrue       = np.zeros(len(Xp), np.float32)
+                            ytrue = np.zeros(len(Xp), np.float32)
                             ytrue[pidx] = 1.0
                             cache_key = ("RPFNet", ds_name, atk, rate, seed)
                             rpf = get_rpf_cached(self.extractor, Xp, yp,
@@ -234,7 +234,7 @@ class RPFNetPoisonDetector:
         if not rpf_pool:
             raise RuntimeError("No RPF batches generated.")
 
-        X_pool = np.concatenate(rpf_pool,   axis=0).astype(np.float32)
+        X_pool = np.concatenate(rpf_pool, axis=0).astype(np.float32)
         y_pool = np.concatenate(label_pool, axis=0).astype(np.float32)
         elapsed = time.time() - t0
         if verbose:
@@ -262,7 +262,8 @@ class RPFNetPoisonDetector:
                 yb = torch.tensor(y_pool[idx], device=self.device)
                 logits = self.net(xb)
                 loss = focal_loss(logits, yb)
-                opt.zero_grad(); loss.backward()
+                opt.zero_grad()
+                loss.backward()
                 nn.utils.clip_grad_norm_(self.net.parameters(), 1.0)
                 opt.step()
                 ep_loss.append(loss.item())
@@ -312,8 +313,13 @@ class RPFNetPoisonDetector:
                             feats = score_distribution_features(s_rk)
                             rate_feats.append(feats)
                             rate_targets.append(np.float32(rate_val))
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            if verbose:
+                                print(
+                                    f"[RPFNet-FIT] skipping {ds_name}|{atk}|{rate_val}|{seed} "
+                                    f"due to error: {type(e).__name__}: {e}"
+                                )
+                            continue
 
         if len(rate_feats) >= 16:
             Xr = np.stack(rate_feats).astype(np.float32)
@@ -329,7 +335,9 @@ class RPFNetPoisonDetector:
                     xb = torch.tensor(Xr[idx], device=self.device)
                     yb = torch.tensor(yr[idx], device=self.device)
                     loss = F.mse_loss(self.rate_head(xb), yb)
-                    rh_opt.zero_grad(); loss.backward(); rh_opt.step()
+                    rh_opt.zero_grad()
+                    loss.backward()
+                    rh_opt.step()
 
             self.rate_head.eval()
             preds = self.rate_head(
@@ -352,8 +360,9 @@ class RPFNetPoisonDetector:
                 y_cont = ds_val[2] if len(ds_val) == 3 else None
                 rpf = self.extractor.extract(X, y, y_cont=y_cont)
                 all_s.append(self._score_rpf(rpf))
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[RPFNet-CALIBRATE] skipped dataset due to error {type(e).__name__}: {e}")
+                continue
         if all_s:
             self._threshold = float(np.percentile(np.concatenate(all_s), 95))
 
@@ -421,7 +430,7 @@ class RPFNetPoisonDetector:
 
     def load(self, path):
         ckpt = torch.load(path, map_location=self.device)
-        dim  = ckpt.get("rpf_dim", RPFExtractor.DIM)
+        dim = ckpt.get("rpf_dim", RPFExtractor.DIM)
         if dim != RPFExtractor.DIM:
             raise ValueError(
                 f"Saved model has RPF dim={dim} but current code expects "
@@ -445,7 +454,7 @@ class HybridEnsembleDetector:
 
     def __init__(self, RPFNet: RPFNetPoisonDetector, fusion_w: float = 0.55):
         self.RPFNet = RPFNet
-        self.fusion_w  = fusion_w
+        self.fusion_w = fusion_w
         self.rate_head = None
 
     def _iso_scores(self, X):
@@ -455,7 +464,7 @@ class HybridEnsembleDetector:
     def _rank_fuse(self, RPFNet_s, iso_s, w=None):
         if w is None: w = self.fusion_w
         mr = rankdata(RPFNet_s).astype(np.float32) / len(RPFNet_s)
-        ir = rankdata(iso_s).astype(np.float32)  / len(iso_s)
+        ir = rankdata(iso_s).astype(np.float32) / len(iso_s)
         return w * mr + (1 - w) * ir
 
     def score(self, X, y, y_cont=None):
@@ -475,8 +484,8 @@ class HybridEnsembleDetector:
                 with torch.no_grad():
                     rate = float(self.rate_head(t).item())
                 return float(np.clip(rate, 0.01, 0.40))
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[HybridEnsembleDetector] _estimate_rate fallback due to {type(e).__name__}: {e}")
 
         return estimate_contamination_rate(ranked)
 
@@ -546,7 +555,7 @@ class HybridEnsembleDetector:
                                 seed=seed * 500 + hash(atk) % 499,
                                 y_cont=y_cont)
                             if len(pidx) < 3: continue
-                            ytrue       = np.zeros(len(Xp), np.float32)
+                            ytrue = np.zeros(len(Xp), np.float32)
                             ytrue[pidx] = 1.0
                             cache_key = ("fusion", ds_name, atk, rate, seed)
                             rpf = get_rpf_cached(self.RPFNet.extractor, Xp, yp,
@@ -556,8 +565,13 @@ class HybridEnsembleDetector:
                             RPFNet_s_list.append(ms)
                             iso_s_list.append(iso_s)
                             y_list.append(ytrue)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            if verbose:
+                                print(
+                                    f"[fusion-cal] skip {ds_name}|{atk}|{rate}|{seed} "
+                                    f"due to {type(e).__name__}: {e}"
+                                )
+                            continue
 
         if not RPFNet_s_list:
             if verbose: print("  [fusion-cal] No data — keeping default w=0.55")

@@ -25,7 +25,7 @@ type Row = {
   dataset?: string;
   score: number;
   y_true?: number;
-  flagged?: number;
+  flagged?: number | boolean;
   reasons?: string[];
   violation_details?: ViolationDetail[];
 };
@@ -137,7 +137,7 @@ type AnalyzeUCIRequest = { uci_id: number; tau?: number };
 type AnalyzeURLRequest = { url: string; tau?: number; dataset_hint?: string };
 type BackendLoadResponse = {
   tau: number;
-  tau_local?: number;
+  tau_local: number;
   threshold_source?: string;
   dataset_id?: string;
   scores: number[];
@@ -1203,15 +1203,18 @@ function ScoreScatter({ rows, tau, height = 260, theme }: { rows: Row[]; tau: nu
       ctx.fillText(`τ=${tau.toFixed(2)}`, margin.l + 6, Math.max(margin.t + 12, yTau - 6));
     }
 
+    const cleanPointColor = theme === themes.dark ? "rgba(78,205,196,0.35)" : "rgba(31,122,224,0.35)";
+    const flaggedPointColor = theme === themes.dark ? "rgba(255,107,107,0.9)" : "rgba(255,75,75,0.9)";
+
     for (const p of sampled) {
       const x = xToPx(p.x);
       const y = yToPx(p.y);
       if (y < margin.t - 10 || y > margin.t + H + 10) continue;
 
       ctx.beginPath();
-      ctx.globalAlpha = p.flagged ? 0.9 : 0.18;
-      ctx.fillStyle = theme.text;
-      const r = p.flagged ? 2.2 : 1.3;
+      ctx.globalAlpha = p.flagged ? 0.9 : 0.22;
+      ctx.fillStyle = p.flagged ? flaggedPointColor : cleanPointColor;
+      const r = p.flagged ? 2.8 : 1.5;
       ctx.arc(x, y, r, 0, Math.PI * 2);
       ctx.fill();
     }
