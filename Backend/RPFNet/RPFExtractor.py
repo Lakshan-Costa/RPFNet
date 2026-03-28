@@ -54,8 +54,8 @@ class RPFExtractor:
             return distances[:, 1:], indices[:, 1:]
         else:
             nbrs = NearestNeighbors(n_neighbors=k + 1, algorithm="ball_tree").fit(X)
-            D, I = nbrs.kneighbors(X)
-            return D[:, 1:], I[:, 1:]
+            D, I_neighbors = nbrs.kneighbors(X)
+            return D[:, 1:], I_neighbors[:, 1:]
 
     def extract(self, X: np.ndarray, y: np.ndarray,
                 y_cont: np.ndarray = None) -> np.ndarray:
