@@ -66,3 +66,34 @@ button:focus-visible {
     background-color: #f9f9f9;
   }
 }
+
+.dark-scroll,
+.light-scroll {
+  overflow: auto;
+  scrollbar-width: thin;
+}
+
+.dark-scroll {
+  scrollbar-color: rgba(255,255,255,0.4) #2f2f2f;
+}
+.dark-scroll::-webkit-scrollbar {
+  width: 10px;
+  background: #2f2f2f;
+}
+.dark-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.35);
+  border-radius: 999px;
+}
+
+.light-scroll {
+  scrollbar-color: rgba(0,0,0,0.35) #dce4ef;
+}
+.light-scroll::-webkit-scrollbar {
+  width: 10px;
+  background: #dce4ef;
+}
+.light-scroll::-webkit-scrollbar-thumb {
+  background: rgba(0,0,0,0.3);
+  border-radius: 999px;
+}
+
