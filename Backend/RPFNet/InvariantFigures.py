@@ -1,41 +1,13 @@
-"""
-InvariantFigures.py - Invariant-level ablation via PERMUTATION.
-
-WHY PERMUTATION NOT ZEROING:
-  RPFExtractor.extract() z-normalises each column to mean~0, std~1.
-  Zeroing a column = setting it to its mean = the network sees "average"
-  features = predictions barely change = F1 drop ~ 0.
-
-  Permutation shuffles each column independently across samples.
-  This preserves the marginal distribution but DESTROYS the per-sample
-  correlation with the poison label. Standard feature importance method.
-
-Usage:
-    from InvariantFigures import (
-        discover_block_layout,
-        run_invariant_ablation,
-        generate_invariant_ablation_figures,
-    )
-
-    discover_block_layout()   # run ONCE to see block keys
-    ablation = run_invariant_ablation(detector, X, y, attacks, apply_attack)
-    generate_invariant_ablation_figures(ablation, output_dir="figures")
-"""
-
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 import os
-
+from Backend.RPFNet.RPFExtractor import RPFExtractor
 from sklearn.metrics import f1_score
 
-
-# ============================================================================
 #  BLOCK DISCOVERY
-# ============================================================================
-
 def discover_block_layout():
     from Backend.RPFNet.RPFExtractor import RPFExtractor
     print("\n" + "=" * 70)
@@ -49,11 +21,7 @@ def discover_block_layout():
     print("=" * 70)
     return RPFExtractor.BLOCK_NAMES
 
-
-# ============================================================================
 #  INVARIANT -> BLOCK MAPPING  (string keys matching RPFExtractor)
-# ============================================================================
-
 INVARIANT_TO_BLOCKS = {
     "I1: Neighbourhood consistency": ["A", "E"],
     "I2: Geometric coherence": ["B"],
@@ -100,11 +68,7 @@ def _build_validated_mapping(block_names_dict, invariant_map=None):
 
     return invariant_map
 
-
-# ============================================================================
 #  ATTACK FAMILIES
-# ============================================================================
-
 ATTACK_FAMILIES = {
     "Label Flip": [
         "label_flip", "boundary_flip", "targeted_class",
@@ -136,11 +100,7 @@ def _attack_to_family(attack_name):
             return fam
     return "Other"
 
-
-# ============================================================================
 #  STYLE
-# ============================================================================
-
 def _set_style():
     plt.rcParams.update({
         "font.size": 10, "font.family": "serif",
@@ -152,10 +112,7 @@ def _set_style():
     })
 
 
-# ============================================================================
-#  CORE ABLATION - PERMUTATION-BASED
-# ============================================================================
-
+#  ABLATION
 def _ablate_invariant_permute(rpf, block_keys, block_names_dict, rng):
     """
     Permutation-ablate: shuffle columns belonging to the given blocks.
@@ -174,35 +131,7 @@ def _ablate_invariant_permute(rpf, block_keys, block_names_dict, rng):
     return rpf_abl, n_cols
 
 
-def run_invariant_ablation(
-    detector,
-    X, y,
-    attacks,
-    apply_attack_fn,
-    rate=0.10,
-    n_trials=3,
-    n_permutations=5,
-    y_cont=None,
-    invariant_map=None,
-    verbose=True,
-):
-    """
-    Invariant-level ablation via PERMUTATION.
-
-    For each (attack, trial):
-      1. Extract full RPF, compute full-model F1
-      2. For each invariant, permute its columns n_permutations times,
-         compute mean ablated F1
-      3. drop = full_F1 - mean(ablated_F1)
-
-    Parameters
-    ----------
-    n_permutations : int
-        Number of independent permutations per invariant per trial.
-        Averaging over multiple shuffles reduces noise.
-    """
-    from Backend.RPFNet.RPFExtractor import RPFExtractor
-
+def run_invariant_ablation(detector, X, y, attacks, apply_attack_fn, rate=0.10, n_trials=3, n_permutations=5, y_cont=None, invariant_map=None, verbose=True,):
     block_names = RPFExtractor.BLOCK_NAMES
     validated_map = _build_validated_mapping(block_names, invariant_map)
     inv_names = list(validated_map.keys())
@@ -359,11 +288,7 @@ def run_invariant_ablation(
         "validated_map": validated_map,
     }
 
-
-# ============================================================================
 #  FIGURES
-# ============================================================================
-
 def fig_invariant_ablation_bar(ablation_results,
                                save_path="figures/fig_invariant_ablation_bar.pdf"):
     _set_style()
@@ -522,11 +447,7 @@ def fig_invariant_per_attack_detail(ablation_results,
     plt.close()
     print(f"  Saved: {save_path}")
 
-
-# ============================================================================
 #  CONSOLE SUMMARY
-# ============================================================================
-
 def print_invariant_ablation_summary(ablation_results):
     inv_names = ablation_results["invariant_names"]
     per_inv = ablation_results["per_invariant"]
@@ -572,11 +493,6 @@ def print_invariant_ablation_summary(ablation_results):
             print(f"   <- {best_inv}")
 
     print("=" * W)
-
-
-# ============================================================================
-#  PUBLIC ENTRY POINT
-# ============================================================================
 
 def generate_invariant_ablation_figures(ablation_results, output_dir="figures"):
     os.makedirs(output_dir, exist_ok=True)

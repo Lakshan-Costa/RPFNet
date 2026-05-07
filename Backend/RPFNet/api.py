@@ -60,7 +60,7 @@ _RateEstimatorHead = None
 _MetaPoisonNet = None
 _RPFExtractor_cls = None
 
-_META_MODEL_PATH = _resolve_bundled_model()   # robust absolute path — set BEFORE backend import
+_META_MODEL_PATH = _resolve_bundled_model()   # robust absolute path - set BEFORE backend import
 _META_EPOCHS = 30
 _META_BATCH_SIZE = 512
 _META_LR = 1e-3
@@ -179,7 +179,6 @@ def _load_model_compat(meta, path: str) -> bool:
     meta.net.eval()
     _LOADED_RPF_DIM = saved_dim
 
-    # Monkey-patch scorer to truncate RPF features to saved_dim
     _orig = meta._score_rpf
     def _patched(rpf, _o=_orig, _d=saved_dim):
         return _o(rpf[:, :_d] if rpf.shape[1] > _d else rpf)
@@ -213,9 +212,9 @@ def _ensure_model():
             lr=_META_LR,
         )
 
-        # Candidate paths — absolute resolved path first, then legacy fallbacks
+        # Candidate paths
         candidates = [
-            _META_MODEL_PATH,                               # robustly resolved absolute path
+            _META_MODEL_PATH,
             os.path.join(BASE_DIR, "RPFNet_universal.pt"), # same dir as api.py
             os.path.join(BASE_DIR, "..", "RPFNet_universal.pt"),
         ]
@@ -350,7 +349,6 @@ def _is_bimodal(scores: np.ndarray) -> bool:
 
     return signals >= 2
 
-
 def _compute_tau(scores: np.ndarray) -> float:
     if len(scores) < 10:
         return float(np.percentile(scores, 95))
@@ -377,7 +375,6 @@ def _compute_tau(scores: np.ndarray) -> float:
         med = float(np.median(scores))
         mad = float(np.median(np.abs(scores - med))) * 1.4826 + 1e-10
         return med + 4.0 * mad
-
 
 def _estimate_rate(scores: np.ndarray) -> float:
     n = len(scores)
@@ -526,9 +523,7 @@ class _StreamState:
         self.warmup: int = 20
         self.columns: list | None = None
 
-
 _stream = _StreamState()
-
 
 def _stream_init_baseline(df: pd.DataFrame) -> dict:
     """Initialise stream with a full dataset as baseline."""
@@ -724,42 +719,6 @@ def analyze(
     source: Literal["uci", "csv", "url", "stream"],
     dataset: Union[int, str, list, dict, np.ndarray, pd.DataFrame,
                    pd.Series, None] = None,) -> dict:
-    """
-    Analyze data for poisoning.
-
-    Parameters
-    ----------
-    source : 'uci' | 'csv' | 'url' | 'stream'
-    dataset :
-        'csv'    → file path (str)
-        'uci'    → UCI dataset ID (int)
-        'url'    → URL string (str)
-        'stream' → DataFrame  — initialise/re-initialise baseline
-                   list / dict / ndarray / Series — score one new row
-                   None — return current stream status
-
-    Returns
-    -------
-    dict
-        Batch mode  : n_rows, n_flagged, n_clean, pct_flagged,
-                      estimated_rate, mode, bimodal, scores, flags,
-                      flagged_indices, clean_indices, dataframe, score_stats
-        Stream init : same shape as batch + status='initialized'
-        Stream row  : score, threshold, poison_flag, n_samples, …
-        Stream status: status, n_samples, n_flagged, initialized, …
-
-    Examples
-    --------
-    >>> report = api.analyze('uci', 73)
-    >>> print(report['pct_flagged'])
-
-    >>> report = api.analyze('stream', training_df)
-    >>> result = api.analyze('stream', [1.2, 3.4, 5.6])
-    >>> print(result['poison_flag'])
-
-    >>> status = api.analyze('stream')
-    >>> print(status['n_samples'])
-    """
     warnings.warn(
         "rpfnet is in BETA — APIs may change and results should be validated.",
         UserWarning,
@@ -814,32 +773,6 @@ def analyze(
 def clean(
     source: Literal["uci", "csv", "url", "stream"],
     dataset: Union[int, str, pd.DataFrame, None] = None,) -> pd.DataFrame:
-    """
-    Return only the clean (non-poisoned) rows.
-
-    Parameters
-    ----------
-    source : 'uci' | 'csv' | 'url' | 'stream'
-    dataset :
-        'csv'    → file path (str)
-        'uci'    → UCI dataset ID (int)
-        'url'    → URL string (str)
-        'stream' → None  — filter current buffer (call analyze first)
-                   DataFrame — initialise baseline then filter
-
-    Returns
-    -------
-    pd.DataFrame
-        Original data with all flagged rows removed.
-
-    Examples
-    --------
-    >>> clean_df = api.clean('uci', 73)
-    >>> print(f"Kept {len(clean_df)} rows")
-
-    >>> api.analyze('stream', training_df)
-    >>> clean_df = api.clean('stream')
-    """
     # Stream
     if source == "stream":
         if isinstance(dataset, pd.DataFrame):

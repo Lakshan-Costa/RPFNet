@@ -33,14 +33,27 @@ class NeighborhoodConsistency(RelationalInvariant):
         n = len(X)
         K = len(np.unique(y))
         k = min(15, n - 2)
-        chance = 1.0 / max(K, 2)
-        nbrs = NearestNeighbors(n_neighbors=k + 1, algorithm="ball_tree").fit(X)
-        _, I_neighbors = nbrs.kneighbors(X)
+
+        nbrs = NearestNeighbors(n_neighbors=k + 1).fit(X)
+        D, I_neighbors = nbrs.kneighbors(X)
+
+        D = D[:, 1:]
         I_neighbors = I_neighbors[:, 1:]
-        agreement = (y[I_neighbors] == y[:, np.newaxis]).mean(1)
-        denom = max(1.0 - chance, 1e-8)
-        excess = np.clip((agreement - chance) / denom, 0.0, 1.0)
-        return (1.0 - excess).astype(np.float32)
+
+        # Distance weighting
+        weights = np.exp(-D / (D.mean() + 1e-8))
+
+        weighted_agree = (
+            weights * (y[I_neighbors] == y[:, None])
+        ).sum(axis=1) / (weights.sum(axis=1) + 1e-8)
+
+        chance = 1.0 / max(K, 2)
+        excess = np.clip((weighted_agree - chance) / (1 - chance + 1e-8), 0, 1)
+
+        stat = 1.0 - excess
+
+        # Normalization
+        return ((stat - stat.mean()) / (stat.std() + 1e-8)).astype(np.float32)
 
 
 class GeometricCoherence(RelationalInvariant):
@@ -78,23 +91,24 @@ class InfluenceBoundedness(RelationalInvariant):
 
     def compute_statistic(self, X, y, rpf=None, y_cont=None):
         n, d = X.shape
-        y_reg = y_cont.astype(np.float64) if y_cont is not None \
-                else y.astype(np.float64)
+
         try:
-            ridge = Ridge(alpha=1.0).fit(X.astype(np.float64), y_reg)
-            y_hat = ridge.predict(X.astype(np.float64))
-            resid = y_reg - y_hat
-            XtX_inv = np.linalg.inv(
-                X.astype(np.float64).T @ X.astype(np.float64)
-                + np.eye(d, dtype=np.float64))
-            H_diag = (X.astype(np.float64) @ XtX_inv
-                      * X.astype(np.float64)).sum(1)
-            mse = (resid ** 2).mean() + 1e-8
-            stud = resid / np.sqrt(mse * (1 - np.clip(H_diag, 0, 0.999) + 1e-8))
-            cooks = (stud ** 2 / max(min(d, n-1), 1)) * (H_diag / (1 - H_diag + 1e-8))
-            return cooks.astype(np.float32)
+            model = LogisticRegression(max_iter=200)
+            model.fit(X, y)
+
+            probs = model.predict_proba(X)[:, 1]
+            resid = y - probs
+
+            # Gradient-based influence (NEW)
+            grad = X * resid[:, None]
+            influence = np.linalg.norm(grad, axis=1)
+
+            stat = influence
+
         except Exception:
-            return np.zeros(n, np.float32)
+            stat = np.zeros(n)
+
+        return ((stat - stat.mean()) / (stat.std() + 1e-8)).astype(np.float32)
 
 
 class StructuralStability(RelationalInvariant):
@@ -106,19 +120,36 @@ class StructuralStability(RelationalInvariant):
 
     def compute_statistic(self, X, y, rpf=None, y_cont=None):
         n = len(X)
-        K = len(np.unique(y))
         k = min(15, n - 2)
-        chance = 1.0 / max(K, 2)
-        nbrs = NearestNeighbors(n_neighbors=k + 1, algorithm="ball_tree").fit(X)
-        _, I_neighbors = nbrs.kneighbors(X)
+
+        nbrs = NearestNeighbors(n_neighbors=k+1).fit(X)
+        D, I_neighbors = nbrs.kneighbors(X)
+
+        D = D[:, 1:]
         I_neighbors = I_neighbors[:, 1:]
-        rev_counts = np.zeros(n, np.float32)
-        np.add.at(rev_counts, I_neighbors.ravel(), 1.0)
-        centrality = rev_counts / (rev_counts.mean() + 1e-8)
-        raw_agree = (y[I_neighbors] == y[:, np.newaxis]).mean(1).astype(np.float32)
-        denom = max(1.0 - chance, 1e-8)
-        excess = np.clip((raw_agree - chance) / denom, 0.0, 1.0)
-        return (centrality * (1.0 - excess + 0.01)).astype(np.float32)
+
+        # Density
+        local_density = 1.0 / (D.mean(axis=1) + 1e-8)
+        density_norm = local_density / (np.median(local_density) + 1e-8)
+
+        # Class structure deviation
+        same_class = (y[I_neighbors] == y[:, None]).sum(axis=1)
+        expected = k / max(len(np.unique(y)), 2)
+        class_dev = np.abs(same_class - expected) / k
+
+        # Graph instability (NEW)
+        instability = np.zeros(n)
+        for i in range(n):
+            neigh_i = set(I_neighbors[i])
+            overlaps = [
+                len(neigh_i & set(I_neighbors[j])) / k
+                for j in I_neighbors[i][:5]
+            ]
+            instability[i] = 1 - np.mean(overlaps)
+
+        stat = density_norm + class_dev + instability
+
+        return ((stat - stat.mean()) / (stat.std() + 1e-8)).astype(np.float32)
 
 
 class ScaleConsistency(RelationalInvariant):
@@ -131,20 +162,30 @@ class ScaleConsistency(RelationalInvariant):
     def compute_statistic(self, X, y, rpf=None, y_cont=None):
         n = len(X)
         classes = np.unique(y)
+
         l2 = np.linalg.norm(X, axis=1)
 
-        l2_z = np.zeros(n, np.float32)
-        rel_scale = np.zeros(n, np.float32)
+        l2_z = np.zeros(n)
+        rel_scale = np.zeros(n)
+        var_dev = np.zeros(n)
+
         for c in classes:
             idx = np.where(y == c)[0]
             if len(idx) < 2:
                 continue
+
             mu = l2[idx].mean()
             sd = l2[idx].std() + 1e-8
-            l2_z[idx] = np.abs((l2[idx] - mu) / sd)
-            rel_scale[idx] = np.abs(np.log(l2[idx] / (mu + 1e-8) + 1e-8))
 
-        return ((l2_z + rel_scale) / 2.0).astype(np.float32)
+            l2_z[idx] = np.abs((l2[idx] - mu) / sd)
+            rel_scale[idx] = np.abs(np.log(l2[idx] / (mu + 1e-8)))
+
+            # Feature-wise deviation (NEW)
+            var_dev[idx] = np.abs(X[idx] - X[idx].mean(0)).mean(axis=1)
+
+        stat = (l2_z + rel_scale + var_dev) / 3.0
+
+        return ((stat - stat.mean()) / (stat.std() + 1e-8)).astype(np.float32)
 
 def compute_row_violations(self, X, y, y_cont=None):
     assert self._fitted, "Call fit_clean_bounds() first"
@@ -159,6 +200,7 @@ def compute_row_violations(self, X, y, y_cont=None):
         results[inv.short_name.split(":")[0]] = (stat > bound)
 
     return results
+
 #  EFFECTIVENESS FILTER
 def measure_attack_effectiveness(X_clean, y_clean, X_poisoned, y_poisoned,
                                   min_accuracy_drop=0.01):
@@ -256,17 +298,20 @@ class InvariantAnalyzer:
             vr_c = float((sc > bound).mean())
 
             try:
+                # Statistical test (Mann-Whitney U)
                 _, p_val = mannwhitneyu(sp, sc, alternative="greater")
                 p_val = float(p_val)
             except Exception:
                 p_val = 1.0
 
+            #Effect size (Cohen's d)
             pooled = np.sqrt(
                 (sc.var() * len(sc) + sp.var() * len(sp))
                 / (len(sc) + len(sp))) + 1e-8
             d = float((sp.mean() - sc.mean()) / pooled)
 
             try:
+                # Kolmogorov-Smirnov test for distributional shift
                 ks_s, ks_p = ks_2samp(sp, sc)
             except Exception:
                 ks_s, ks_p = 0.0, 1.0

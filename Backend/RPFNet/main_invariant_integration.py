@@ -131,15 +131,15 @@ def run_theoretical_analysis(RPFNet_data, eval_ds, grand_results,
 
 def generate_paper_table_coverage(coverage_results):
     inv_short = {
-        "I₁: Neighborhood consistency": "I₁",
-        "I₂: Geometric coherence": "I₂",
-        "I₃: Influence boundedness": "I₃",
-        "I₄: Structural stability": "I₄",
+        "I1: Neighborhood consistency": "I1",
+        "I2: Geometric coherence": "I2",
+        "I3: Influence boundedness": "I3",
+        "I4: Structural stability": "I4",
     }
 
     inv_names = list(inv_short.keys())
 
-    print("\n% LaTeX table - Attack × Invariant Violation Matrix")
+    print("\n% LaTeX table - Attack x Invariant Violation Matrix")
     print("\\begin{table}[t]")
     print("\\centering")
     print("\\caption{Attack-Invariant violation matrix. Each cell shows the")
