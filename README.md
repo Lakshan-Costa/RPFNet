@@ -204,10 +204,32 @@ seed = 42
 To run the UI:
 
 ```bash
-cd frontend
+cd frontend/MetaPoisonWeb/
 npm install
 npm run dev
 ```
+
+---
+
+## Backend
+
+To run the backend server:
+
+```bash
+cd Backend
+python -m RPFNet.app
+```
+
+---
+
+## Example
+
+1. Open the web application in the browser.
+2. After opening the application:
+3. Select UCI from the top-left dataset source selector
+4. Enter 15 as the contamination rate
+5. Click Analyze Dataset
+6. View results at the bottom of the page in the most suspicious rows table
 
 ---
 
@@ -224,3 +246,7 @@ Lower performance at very low contamination rates (≤1%)
 This project is for academic and research purposes.
 
 ---
+
+```
+
+```
