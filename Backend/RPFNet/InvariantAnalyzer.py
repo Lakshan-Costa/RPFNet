@@ -1,3 +1,5 @@
+import zlib
+
 import numpy as np
 from scipy import stats
 from scipy.stats import rankdata, ks_2samp, mannwhitneyu
@@ -27,7 +29,7 @@ class NeighborhoodConsistency(RelationalInvariant):
         super().__init__(
             "I1: Neighborhood consistency", "I1:Neigh",
             "k-NN label agreement (excess over chance) bounded below",
-            [slice(0, 8)])
+            [slice(0, 8), slice(34, 47)])
 
     def compute_statistic(self, X, y, rpf=None, y_cont=None):
         n = len(X)
@@ -96,8 +98,10 @@ class InfluenceBoundedness(RelationalInvariant):
             model = LogisticRegression(max_iter=200)
             model.fit(X, y)
 
-            probs = model.predict_proba(X)[:, 1]
-            resid = y - probs
+            # 1 - p(true class): equals |y - p1| for binary labels and is also
+            # correct for multiclass (the former y - p1 was not).
+            probs = model.predict_proba(X)
+            resid = 1.0 - probs[np.arange(n), np.searchsorted(model.classes_, y)]
 
             # Gradient-based influence (NEW)
             grad = X * resid[:, None]
@@ -222,7 +226,7 @@ def measure_attack_effectiveness(X_clean, y_clean, X_poisoned, y_poisoned,
         acc_c = accuracy_score(y_test, clf_c.predict(X_test))
 
         clf_p = LogisticRegression(C=1.0, max_iter=300, random_state=42)
-        clf_p.fit(X_poisoned, y_poisoned)
+        clf_p.fit(X_poisoned[train_mask], y_poisoned[train_mask])
         acc_p = accuracy_score(y_test, clf_p.predict(X_test))
 
         drop = acc_c - acc_p
@@ -352,11 +356,20 @@ class InvariantAnalyzer:
         inv_names = [inv.name for inv in self.invariants]
         n_effective, n_ineffective = 0, 0
         ineffective_log = []
+        clean_control = []
 
         for ds_name, ds_val in datasets.items():
             X, y = ds_val[0], ds_val[1]
             y_cont = ds_val[2] if len(ds_val) == 3 else None
             self.fit_clean_bounds(X, y, y_cont=y_cont)
+
+            for rate in rates:
+                for seed in range(seeds):
+                    mask = np.zeros(len(X), dtype=bool)
+                    mask[np.random.default_rng(seed).choice(
+                        len(X), max(3, int(len(X) * rate)), replace=False)] = True
+                    rc = self.analyze_attack(X, y, mask, y_cont=y_cont, attack_name="none")
+                    clean_control.append(rc["any_violated"])
 
             for atk in attacks:
                 for rate in rates:
@@ -364,7 +377,7 @@ class InvariantAnalyzer:
                         try:
                             Xp, yp, pidx = apply_attack_fn(
                                 atk, X, y, fraction=rate,
-                                seed=seed * 1000 + hash(atk) % 997,
+                                seed=seed * 1000 + zlib.crc32(atk.encode()) % 997,
                                 y_cont=y_cont)
                             if len(pidx) < 3:
                                 continue
@@ -458,12 +471,15 @@ class InvariantAnalyzer:
                 key=lambda x: x[1]["coverage"])[:5],
             "all_results": all_results,
             "ineffective_log": ineffective_log,
+            "clean_control": {
+                "n": len(clean_control),
+                "false_violation_rate": (float(np.mean(clean_control))
+                                         if clean_control else float("nan"))},
         }
 
     def transferability_analysis(self, datasets, verbose=True):
         inv_names = [inv.name for inv in self.invariants]
         ds_stats = {}
-        jitter_rng = np.random.default_rng(123)
 
         for ds_name, ds_val in datasets.items():
             X, y = ds_val[0], ds_val[1]
@@ -471,10 +487,9 @@ class InvariantAnalyzer:
             ds_stats[ds_name] = {}
             for inv in self.invariants:
                 raw = inv.compute_statistic(X, y, y_cont=y_cont)
-                # Add tiny jitter to break ties (magnitude << data scale)
-                jitter = jitter_rng.uniform(-1e-7, 1e-7, len(raw))
-                ranked = rankdata(raw + jitter).astype(np.float32) / len(raw)
-                ds_stats[ds_name][inv.name] = ranked
+                # Standardise, then compare shapes. (Rank-normalised values are
+                # uniform for every dataset, which made every KS distance ~0.)
+                ds_stats[ds_name][inv.name] = (raw - raw.mean()) / (raw.std() + 1e-8)
 
         ds_names = list(ds_stats.keys())
         n_ds = len(ds_names)
@@ -559,30 +574,6 @@ class InvariantAnalyzer:
         print(f"\n  Overall: {np.mean([v['mean_ks'] for v in tr['summary'].values()]):.4f}")
 
 
-#  GAUSSIAN MIXTURE BOUNDS
-class GaussianMixtureBounds:
-    @staticmethod
-    def print_bounds(delta, sigma, k, d, n, K=2):
-        from scipy.stats import norm
-        snr = delta / (sigma * np.sqrt(2))
-        p_same = max(1.0/K, min(1.0 - (K-1)*norm.cdf(-snr/2), 1.0))
-        eps = np.sqrt(np.log(20.0) / (2 * k))
-        d_own = sigma * np.sqrt(d)
-        d_other = np.sqrt(delta**2 + d * sigma**2)
-        cooks_bound = (2*d)/n + np.sqrt(np.log(20)/n)
-        z_bound = np.sqrt(2 * np.log(40.0))
-
-        print(f"\n  Theoretical Bounds (Gaussian Mixture, 5 invariants)")
-        print(f"  delta={delta}, sigma={sigma}, k={k}, d={d}, n={n}, K={K}")
-        print(f"  SNR = {delta/(sigma*np.sqrt(d)):.2f}")
-        print(f"  I1: E[agreement] >= {p_same:.3f}, "
-              f"violation if < {max(0, p_same - eps):.3f}")
-        print(f"  I2: E[d_own] ~ {d_own:.2f}, E[d_other] ~ {d_other:.2f}")
-        print(f"  I3: Cook's bound = {cooks_bound:.4f}")
-        print(f"  I4: Structural bound = {0.5/K + 0.1:.3f}")
-        print(f"  I5: Scale z-bound = {z_bound:.2f}")
-
-
 #  SYNTHETIC VALIDATION (7 attacks including dist_shift, repr_inversion)
 def synthetic_validation(n=2000, d=20, delta=3.0, sigma=1.0, k=15,
                          poison_rate=0.10, verbose=True):
@@ -599,7 +590,6 @@ def synthetic_validation(n=2000, d=20, delta=3.0, sigma=1.0, k=15,
 
     if verbose:
         print(f"\n  Synthetic: n={n}, d={d}, delta={delta}, sigma={sigma}")
-        GaussianMixtureBounds.print_bounds(delta, sigma, k, d, n)
 
     ana = InvariantAnalyzer(alpha=0.05)
     ana.fit_clean_bounds(X, y)
@@ -683,4 +673,4 @@ def synthetic_validation(n=2000, d=20, delta=3.0, sigma=1.0, k=15,
     if verbose:
         print(f"\n  COVERAGE: {'ALL DETECTED' if ok else 'GAP'}  "
               f"({nc}/{len(results)})")
-    return results, ana
+    return results, ana

@@ -1,11 +1,15 @@
 import warnings
 warnings.filterwarnings("ignore")
 
+import time
+
 import numpy as np
+import scipy.sparse as sp
+from scipy.sparse.linalg import svds
 from sklearn.decomposition import PCA
 from scipy.stats import rankdata
 from sklearn.ensemble import (RandomForestClassifier, IsolationForest,
-                               GradientBoostingClassifier)
+                               GradientBoostingClassifier, HistGradientBoostingClassifier)
 from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.model_selection import StratifiedKFold
 from sklearn.neighbors import NearestNeighbors
@@ -16,8 +20,33 @@ try:
 except ImportError:
     FAISS_AVAILABLE = False
 
+# Threads for the forests below. Their output does not depend on it; the
+# parallel precompute (evaluation.precompute) sets 1 inside each worker.
+N_JOBS = -1
+
+# One name per column of the version-1 fingerprint (see the paper's appendix table).
+FEATURE_NAMES_V1 = (
+    "A_same_frac_ks", "A_log_dist_ratio_ks", "A_label_entropy_ks", "A_near_diff_same_ks",
+    "A_same_frac_kl", "A_log_dist_ratio_kl", "A_label_entropy_kl", "A_near_diff_same_kl",
+    "B_own_centroid_dist", "B_other_centroid_dist", "B_log_own_other", "B_proj_to_other",
+    "B_own_dist_pct", "B_other_own_ratio", "B_cos_own_mean", "B_midpoint_proj", "B_pca_own_dist",
+    "C_norm_z", "C_sign_agree", "C_rel_norm", "C_trimmed_mad",
+    "D_lr_err", "D_rf_err", "D_lr_ce", "D_rf_ce", "D_lr_rf_diff", "D_rf_margin",
+    "D_lr_err_rank", "D_rf_err_rank", "D_rf_fold_std", "D_lr_rf_both_correct",
+    "D_rf_true_prob", "D_rf_below_chance", "D_3model_disagree",
+    "E_iforest", "E_local_purity", "E_lof_approx", "E_mean_same_dist", "E_mean_diff_dist",
+    "E_knn_dist_std", "E_iforest_x_impurity", "E_iforest_rank", "E_density_ratio",
+    "E_lof_trimmed", "E_proj_to_other", "E_diff_closer_frac", "E_ambiguity_rank",
+    "F_leverage_rank", "F_stud_resid_rank", "F_cooks_rank", "F_dffits_rank",
+    "F_nbr_resid_sign_agree", "F_pred_rank_in_class", "F_resid_x_lev_rank", "F_loo_influence_rank",
+    "G_rev_nbr_count", "G_embedding_depth", "G_two_hop_reach", "G_centrality_x_disagree",
+    "G_two_hop_one_hop_ratio", "G_displacement_rank",
+)
+
+
 class RPFExtractor:
-    DIM = 61
+    """Relational Poison Fingerprint."""
+    DIM = 61   # version-1 layout; use `self.dim` for the active version
 
     BLOCK_NAMES = {
         "A" : ("kNN Label Consistency", slice(0, 8)),
@@ -29,16 +58,44 @@ class RPFExtractor:
         "G" : ("Structural Echo", slice(55, 61)),
     }
 
+    # v2 drops columns that equal another column by construction on every
+    # dataset: 31 = 1 - col 22, 35 = col 4, 50 has the same ranking as col 49.
+    V2_DROP = (31, 35, 50)
+
     def __init__(self, k_small: int = 5, k_large: int = 15,
-                 cv_folds: int = 5):
+                 cv_folds: int = 5, feature_version: int = 1,
+                 random_state: int = 42):
+        if feature_version not in (1, 2):
+            raise ValueError(f"feature_version must be 1 or 2, got {feature_version}")
         self.k_small = k_small
         self.k_large = k_large
         self.cv_folds = cv_folds
+        self.feature_version = feature_version
+        self.random_state = random_state
         self._last_neighbors = None
+        self.last_timings = {}
+
+        if feature_version == 1:
+            self._keep = np.arange(self.DIM)
+            self.feature_names = list(FEATURE_NAMES_V1)
+            self.block_names = dict(self.BLOCK_NAMES)
+        else:
+            self._keep = np.array([i for i in range(self.DIM) if i not in self.V2_DROP])
+            names = [FEATURE_NAMES_V1[i] for i in self._keep]
+            names[names.index("D_rf_fold_std")] = "D_rf_tree_std"
+            self.feature_names = names + ["H_grad_spectral"]
+            self.block_names = {}
+            for key, (desc, sl) in self.BLOCK_NAMES.items():
+                start = int((self._keep < sl.start).sum())
+                width = int(((self._keep >= sl.start) & (self._keep < sl.stop)).sum())
+                self.block_names[key] = (desc, slice(start, start + width))
+            self.block_names["H"] = ("Gradient Spectral", slice(len(self._keep), len(self._keep) + 1))
+        self.dim = len(self.feature_names)
 
     def _compute_neighbors(self, X, k):
         X_f32 = np.ascontiguousarray(X, dtype=np.float32)
         n, d = X_f32.shape
+        v1 = self.feature_version == 1
         if FAISS_AVAILABLE and n > 500:
             if n > 50000:
                 nlist = min(256, n // 100)
@@ -51,36 +108,71 @@ class RPFExtractor:
                 index = faiss.IndexFlatL2(d)
                 index.add(X_f32)
             distances, indices = index.search(X_f32, k + 1)
-            return distances[:, 1:], indices[:, 1:]
+            if v1:
+                return distances[:, 1:], indices[:, 1:]
+            # FAISS returns squared L2; v2 uses true distances, like sklearn.
+            D, I_neighbors = np.sqrt(np.maximum(distances, 0.0)), indices
         else:
             nbrs = NearestNeighbors(n_neighbors=k + 1, algorithm="ball_tree").fit(X)
             D, I_neighbors = nbrs.kneighbors(X)
-            return D[:, 1:], I_neighbors[:, 1:]
+            if v1:
+                return D[:, 1:], I_neighbors[:, 1:]
+        # v2: drop the query point wherever it appears. With duplicate rows the
+        # point itself is not guaranteed to be returned first.
+        is_self = I_neighbors == np.arange(n)[:, None]
+        keep = ~is_self
+        keep[~is_self.any(1), -1] = False
+        return D[keep].reshape(n, k), I_neighbors[keep].reshape(n, k)
 
     def extract(self, X: np.ndarray, y: np.ndarray,
                 y_cont: np.ndarray = None) -> np.ndarray:
         n, d = X.shape
         rpf = np.zeros((n, self.DIM), dtype=np.float32)
+        timings = {}
 
         k1 = max(2, min(self.k_small, n - 2))
         k2 = max(2, min(self.k_large, n - 2))
         k_max = k2 + 1
 
+        self._full_lr = None
+        t0 = time.perf_counter()
         D_all, I_all = self._compute_neighbors(X, k_max)
+        timings["neighbours"] = time.perf_counter() - t0
         self._last_neighbors = (I_all, D_all)
 
-        self._block_a(X, y, rpf, k1, k2, D_all, I_all)
-        self._block_b(X, y, rpf)
-        self._block_c(X, y, rpf)
-        self._block_d_oof(X, y, rpf)
-        self._block_e(X, y, rpf, k2, D_all, I_all)
-        self._block_f(X, y, rpf, D_all, I_all, y_cont=y_cont)
-        self._block_g(X, y, rpf, k2, D_all, I_all)
+        steps = [
+            ("A", lambda: self._block_a(X, y, rpf, k1, k2, D_all, I_all)),
+            ("B", lambda: self._block_b(X, y, rpf)),
+            ("C", lambda: self._block_c(X, y, rpf)),
+            ("D", lambda: self._block_d_oof(X, y, rpf)),
+            ("E", lambda: self._block_e(X, y, rpf, k2, D_all, I_all)),
+            ("F", lambda: self._block_f(X, y, rpf, D_all, I_all, y_cont=y_cont)),
+            ("G", lambda: self._block_g(X, y, rpf, k2, D_all, I_all)),
+        ]
+        for name, step in steps:
+            t0 = time.perf_counter()
+            step()
+            timings[name] = time.perf_counter() - t0
 
-        mu = rpf.mean(0, keepdims=True)
-        std = rpf.std(0, keepdims=True) + 1e-8
-        rpf = (rpf - mu) / std
+        if self.feature_version == 1:
+            mu = rpf.mean(0, keepdims=True)
+            std = rpf.std(0, keepdims=True) + 1e-8
+            rpf = (rpf - mu) / std
+        else:
+            t0 = time.perf_counter()
+            h = self._block_h(X, y)
+            timings["H"] = time.perf_counter() - t0
+            rpf = np.column_stack([rpf[:, self._keep], h]).astype(np.float32)
+            # Median/IQR scaling: mean and std are pulled by the poison itself.
+            # Columns with zero IQR (rare indicators) fall back to the std.
+            med = np.median(rpf, 0, keepdims=True)
+            q75, q25 = np.percentile(rpf, [75, 25], axis=0, keepdims=True)
+            scale = (q75 - q25) / 1.349
+            scale = np.where(scale > 1e-8, scale, rpf.std(0, keepdims=True)) + 1e-8
+            rpf = (rpf - med) / scale
 
+        self._full_lr = None
+        self.last_timings = timings
         return rpf.astype(np.float32)
 
     def _block_a(self, X, y, rpf, k1, k2, D_all, I_all):
@@ -140,7 +232,7 @@ class RPFExtractor:
 
         m_own = np.sqrt(((X - own_mu) / own_st) ** 2).mean(1).astype(np.float32)
 
-        pca = PCA(n_components=min(5, X.shape[1]))
+        pca = PCA(n_components=min(5, X.shape[1]), random_state=self.random_state)
         Xpca = pca.fit_transform(X)
         mu_pca = np.zeros((K, Xpca.shape[1]))
         for ki, c in enumerate(classes):
@@ -209,14 +301,16 @@ class RPFExtractor:
             sd_n = l2[idx].std() + 1e-8
             l2_z[idx] = (l2[idx] - mu_n) / sd_n
 
-        mus_c = {c: X[y == c].mean(0) for c in classes if (y == c).sum() >= 2}
-        own_mu = np.array([mus_c.get(yi, X.mean(0)) for yi in y], np.float32)
+        # Vectorised; gives the same values as the former per-row loops.
+        cls_idx = np.searchsorted(classes, y)
+        fallback = X.mean(0)
+        mus_c = np.array([X[y == c].mean(0) if (y == c).sum() >= 2 else fallback
+                          for c in classes], np.float32)
+        own_mu = mus_c[cls_idx]
         sign_agr = (np.sign(X) == np.sign(own_mu)).mean(1).astype(np.float32)
 
-        mean_l2 = {c: l2[y == c].mean() + 1e-8 for c in classes
-                   if (y == c).sum() >= 1}
-        rel_scale = np.array([l2[i] / mean_l2.get(y[i], 1.0)
-                               for i in range(n)], np.float32)
+        mean_l2 = np.array([l2[y == c].mean() + 1e-8 for c in classes])
+        rel_scale = (l2 / mean_l2[cls_idx]).astype(np.float32)
 
         mad = np.zeros(n, np.float32)
         for c in classes:
@@ -238,18 +332,22 @@ class RPFExtractor:
         n = len(X)
         classes = np.unique(y)
         K = len(classes)
-        n_folds = min(self.cv_folds, int(min(np.bincount(y.astype(int)))))
+        v1 = self.feature_version == 1
+        rs = self.random_state
+        # v1 counts with bincount, which reports 0 for absent labels below the
+        # maximum (e.g. labels {1, 2}); v2 counts only the classes present.
+        counts = np.bincount(y.astype(int)) if v1 else np.unique(y, return_counts=True)[1]
+        n_folds = min(self.cv_folds, int(min(counts)))
         n_folds = max(2, n_folds)
 
         plr_true = np.full(n, 1.0 / K, np.float32)
         prf_true = np.full(n, 1.0 / K, np.float32)
         pgb_true = np.full(n, 1.0 / K, np.float32)
         prf_fold = np.zeros((n, n_folds), np.float32)
+        prf_tree_std = np.zeros(n, np.float32)
         prf_max_other = np.full(n, 1.0 / K, np.float32)
 
-        rf_pred_class = np.zeros((n, n_folds), np.float32)
-
-        skf = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=42)
+        skf = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=rs)
         fold_idx = 0
 
         for train_idx, val_idx in skf.split(X, y):
@@ -260,9 +358,12 @@ class RPFExtractor:
                 fold_idx += 1
                 continue
 
+            # v1 skips the rest of a fold (and its fold counter) after any model
+            # fails; v2 lets each model fail on its own.
+            ok = True
             try:
                 lr = LogisticRegression(C=1.0, max_iter=300,
-                                        random_state=42).fit(Xtr, ytr)
+                                        random_state=rs).fit(Xtr, ytr)
                 proba_lr = lr.predict_proba(Xvl)
                 lr_cls = lr.classes_.tolist()
                 lr_col = np.array([lr_cls.index(c) if c in lr_cls else 0
@@ -270,47 +371,60 @@ class RPFExtractor:
                 plr_true[val_idx] = proba_lr[np.arange(len(val_idx)), lr_col]
             except Exception as e:
                 print(f"[RPFExtractor] _block_d_oof logistic regression failed: {type(e).__name__}: {e}")
-                continue
+                ok = False
 
-            try:
-                rf = RandomForestClassifier(
-                    n_estimators=30, max_depth=4, min_samples_leaf=3,
-                    class_weight="balanced", random_state=42, n_jobs=-1
-                ).fit(Xtr, ytr)
+            if ok or not v1:
+                try:
+                    rf = RandomForestClassifier(
+                        n_estimators=30, max_depth=4, min_samples_leaf=3,
+                        class_weight="balanced", random_state=rs, n_jobs=N_JOBS
+                    ).fit(Xtr, ytr)
 
-                proba_rf = rf.predict_proba(Xvl)
-                rf_cls = rf.classes_.tolist()
+                    proba_rf = rf.predict_proba(Xvl)
+                    rf_cls = rf.classes_.tolist()
 
-                rf_col = np.array([rf_cls.index(c) if c in rf_cls else 0
-                                for c in yvl])
+                    rf_col = np.array([rf_cls.index(c) if c in rf_cls else 0
+                                    for c in yvl])
 
-                p_true = proba_rf[np.arange(len(val_idx)), rf_col]
+                    rows = np.arange(len(val_idx))
+                    p_true = proba_rf[rows, rf_col]
 
-                prf_true[val_idx] = p_true
-                prf_fold[val_idx, fold_idx] = p_true
+                    prf_true[val_idx] = p_true
+                    prf_fold[val_idx, fold_idx] = p_true
+                    if not v1:
+                        # Spread of the true-class probability across the forest's
+                        # bootstrap trees: variability under training-set resampling.
+                        per_tree = np.stack([t.predict_proba(Xvl)[rows, rf_col]
+                                             for t in rf.estimators_])
+                        prf_tree_std[val_idx] = per_tree.std(0)
 
-                proba_rf_cp = proba_rf.copy()
-                proba_rf_cp[np.arange(len(val_idx)), rf_col] = 0.0
-                prf_max_other[val_idx] = proba_rf_cp.max(1)
+                    proba_rf_cp = proba_rf.copy()
+                    proba_rf_cp[rows, rf_col] = 0.0
+                    prf_max_other[val_idx] = proba_rf_cp.max(1)
 
-            except Exception as e:
-                print(f"[RPFExtractor] _block_d_oof random forest failed: {type(e).__name__}: {e}")
-                continue
-            try:
-                gb = GradientBoostingClassifier(
-                    n_estimators=30, max_depth=3, learning_rate=0.1,
-                    random_state=42
-                ).fit(Xtr, ytr)
-                proba_gb = gb.predict_proba(Xvl)
-                gb_cls = gb.classes_.tolist()
-                gb_col = np.array([gb_cls.index(c) if c in gb_cls else 0
-                                      for c in yvl])
-                pgb_true[val_idx] = proba_gb[np.arange(len(val_idx)), gb_col]
-            except Exception as e:
-                print(f"[RPFExtractor] _block_d_oof gradient boosting failed: {type(e).__name__}: {e}")
-                continue
+                except Exception as e:
+                    print(f"[RPFExtractor] _block_d_oof random forest failed: {type(e).__name__}: {e}")
+                    ok = False
+            if ok or not v1:
+                try:
+                    gb = (GradientBoostingClassifier(
+                        n_estimators=30, max_depth=3, learning_rate=0.1,
+                        random_state=rs) if v1 else
+                          HistGradientBoostingClassifier(
+                        max_iter=30, max_depth=3, learning_rate=0.1, early_stopping=False,
+                        min_samples_leaf=1, max_leaf_nodes=None, random_state=rs)
+                          ).fit(Xtr, ytr)
+                    proba_gb = gb.predict_proba(Xvl)
+                    gb_cls = gb.classes_.tolist()
+                    gb_col = np.array([gb_cls.index(c) if c in gb_cls else 0
+                                          for c in yvl])
+                    pgb_true[val_idx] = proba_gb[np.arange(len(val_idx)), gb_col]
+                except Exception as e:
+                    print(f"[RPFExtractor] _block_d_oof gradient boosting failed: {type(e).__name__}: {e}")
+                    ok = False
 
-            fold_idx += 1
+            if ok or not v1:
+                fold_idx += 1
 
         wrong_lr = (1 - plr_true).astype(np.float32)
         wrong_rf = (1 - prf_true).astype(np.float32)
@@ -324,9 +438,9 @@ class RPFExtractor:
         rk_lr = rankdata(wrong_lr).astype(np.float32) / n
         rk_rf = rankdata(wrong_rf).astype(np.float32) / n
 
-        fold_std = prf_fold.std(1).astype(np.float32)
-
-        class_instability = (rf_pred_class.std(1) > 0).astype(np.float32)
+        # v1's prf_fold holds one non-zero entry per row, so its std is a fixed
+        # multiple of the RF probability; v2 replaces it with the tree spread.
+        fold_std = (prf_fold.std(1) if v1 else prf_tree_std).astype(np.float32)
 
         rand_thresh = 1.0 / K
         correct_lr = (plr_true > rand_thresh).astype(np.float32)
@@ -363,7 +477,7 @@ class RPFExtractor:
         same = (NL == y[:, np.newaxis])
 
         try:
-            iso = IsolationForest(n_estimators=100, random_state=42, n_jobs=-1)
+            iso = IsolationForest(n_estimators=100, random_state=self.random_state, n_jobs=N_JOBS)
             iso_raw = -iso.fit(X).score_samples(X)
         except Exception:
             iso_raw = np.zeros(n, np.float32)
@@ -440,7 +554,8 @@ class RPFExtractor:
 
         try:
             sur = LogisticRegression(C=1.0, max_iter=300,
-                                          random_state=42).fit(X, y)
+                                          random_state=self.random_state).fit(X, y)
+            self._full_lr = sur
             ambiguity = (1.0 - sur.predict_proba(X).max(1)).astype(np.float32)
             amb_rank = np.zeros(n, np.float32)
             for c in classes:
@@ -456,24 +571,34 @@ class RPFExtractor:
                  D_all: np.ndarray, I_all: np.ndarray,
                  y_cont: np.ndarray = None):
         n, d = X.shape
+        v1 = self.feature_version == 1
+        Xf = X.astype(np.float64)
 
         y_reg = y_cont.astype(np.float64) if y_cont is not None \
                 else y.astype(np.float64)
+        classes = np.unique(y)
+        onehot = (not v1) and y_cont is None and len(classes) > 2
 
         try:
-            ridge = Ridge(alpha=1.0).fit(X.astype(np.float64), y_reg)
-            y_hat = ridge.predict(X.astype(np.float64))
-            resid = y_reg - y_hat
+            if onehot:
+                own = np.searchsorted(classes, y)
+                Y = (y[:, None] == classes[None, :]).astype(np.float64)
+                y_hat = Ridge(alpha=1.0).fit(Xf, Y).predict(Xf)[np.arange(n), own]
+                resid = 1.0 - y_hat
+            else:
+                ridge = Ridge(alpha=1.0).fit(Xf, y_reg)
+                y_hat = ridge.predict(Xf)
+                resid = y_reg - y_hat
         except Exception:
             rpf[:, 47:55] = 0.0
             return
 
         try:
-            XtX_inv = np.linalg.inv(
-                X.astype(np.float64).T @ X.astype(np.float64)
-                + 1.0 * np.eye(d, dtype=np.float64))
-            H_diag = (X.astype(np.float64) @ XtX_inv
-                      * X.astype(np.float64)).sum(1)
+            # Ridge fits an intercept, so its hat matrix is 1/n + the leverage of
+            # the centred data; v1 omits both, v2 includes them.
+            Xh = Xf if v1 else Xf - Xf.mean(0)
+            XtX_inv = np.linalg.inv(Xh.T @ Xh + 1.0 * np.eye(d, dtype=np.float64))
+            H_diag = (Xh @ XtX_inv * Xh).sum(1) + (0.0 if v1 else 1.0 / n)
         except np.linalg.LinAlgError:
             H_diag = np.full(n, 1.0 / n, dtype=np.float64)
 
@@ -530,52 +655,38 @@ class RPFExtractor:
 
         rpf[:, 56] = embedding_depth
 
-        rev_adj_starts = np.zeros(n + 1, dtype=np.int64)
-        for target in I_flat:
-            rev_adj_starts[target + 1] += 1
-        np.cumsum(rev_adj_starts, out=rev_adj_starts)
+        # Reverse kNN graph in CSR form: row i lists, in ascending order, the
+        # points that have i among their k neighbours.
+        rev_adj_starts = np.concatenate(
+            [[0], np.cumsum(np.bincount(I_flat, minlength=n))]).astype(np.int64)
+        rev_adj_flat = (np.argsort(I_flat, kind="stable") // k).astype(np.int64)
+        hop1_sizes = np.diff(rev_adj_starts).astype(np.float32)
 
-        rev_adj_flat = np.empty(len(I_flat), dtype=np.int64)
-        write_pos = rev_adj_starts[:-1].copy()
-        for j in range(n):
-            for p in range(k):
-                target = I[j, p]
-                rev_adj_flat[write_pos[target]] = j
-                write_pos[target] += 1
+        # Two-hop reach: |(union of rev(j) for j in rev(i)) minus i and rev(i)|,
+        # computed with one sparse product instead of Python loops.
+        R = sp.csr_matrix((np.ones(len(rev_adj_flat), np.int32), rev_adj_flat,
+                           rev_adj_starts), shape=(n, n))
+        R2 = (R @ R).tocsr()
+        R2.data[:] = 1
+        overlap = np.asarray(R2.multiply(R).sum(1)).ravel()
+        diag2, diag1 = R2.diagonal(), R.diagonal()
+        hop2_sizes = (R2.getnnz(axis=1) - overlap - diag2 + diag2 * diag1).astype(np.float32)
 
-        hop1_sizes = (rev_adj_starts[1:] - rev_adj_starts[:-1]).astype(np.float32)
-        hop2_sizes = np.zeros(n, dtype=np.float32)
-
-        max_hop1_expand = 200
-        rng = np.random.default_rng(42)
-
-        for i in range(n):
-            h1_start = rev_adj_starts[i]
-            h1_end = rev_adj_starts[i + 1]
-            h1_count = h1_end - h1_start
-            if h1_count == 0:
-                continue
-
-            hop1 = rev_adj_flat[h1_start:h1_end]
-            hop1_set = set(hop1)
-
-            if h1_count <= max_hop1_expand:
-                expand = hop1
-                scale = 1.0
-            else:
+        if self.feature_version == 1:
+            # v1 estimated hubs (> 200 reverse neighbours) from a sample of 200;
+            # recomputed exactly as before so v1 output does not change.
+            max_hop1_expand = 200
+            rng = np.random.default_rng(self.random_state)
+            for i in np.where(hop1_sizes > max_hop1_expand)[0]:
+                hop1 = rev_adj_flat[rev_adj_starts[i]:rev_adj_starts[i + 1]]
+                hop1_set = set(hop1)
                 expand = rng.choice(hop1, max_hop1_expand, replace=False)
-                scale = h1_count / max_hop1_expand
-
-            hop2_set = set()
-            for j in expand:
-                j_start = rev_adj_starts[j]
-                j_end = rev_adj_starts[j + 1]
-                for idx in range(j_start, j_end):
-                    m = rev_adj_flat[idx]
-                    if m != i and m not in hop1_set:
-                        hop2_set.add(m)
-
-            hop2_sizes[i] = len(hop2_set) * scale
+                hop2_set = set()
+                for j in expand:
+                    for m in rev_adj_flat[rev_adj_starts[j]:rev_adj_starts[j + 1]]:
+                        if m != i and m not in hop1_set:
+                            hop2_set.add(m)
+                hop2_sizes[i] = len(hop2_set) * (len(hop1) / max_hop1_expand)
 
         hop2_mean = hop2_sizes.mean() + 1e-8
         rpf[:, 57] = hop2_sizes / hop2_mean
@@ -599,3 +710,28 @@ class RPFExtractor:
         displacement = (disp_sum / (disp_cnt + 1e-8)).astype(np.float32)
 
         rpf[:, 60] = rankdata(displacement).astype(np.float32) / n
+
+    def _block_h(self, X: np.ndarray, y: np.ndarray) -> np.ndarray:
+        """v2 only."""
+        n = len(X)
+        if len(np.unique(y)) < 2:
+            return np.zeros(n, np.float32)
+        try:
+            # the same model block E fitted on the same rows, if it did
+            lr = getattr(self, "_full_lr", None)
+            if lr is None:
+                lr = LogisticRegression(C=1.0, max_iter=300,
+                                        random_state=self.random_state).fit(X, y)
+            P = lr.predict_proba(X)
+            Yh = (y[:, None] == lr.classes_[None, :]).astype(np.float64)
+            Xa = np.hstack([X.astype(np.float64), np.ones((n, 1))])
+            G = ((P - Yh)[:, :, None] * Xa[:, None, :]).reshape(n, -1)
+            G -= G.mean(0)
+            # ARPACK needs a start vector of length min(n, p); with many classes
+            # and features p = K (d + 1) can exceed n (e.g. mfeat_factors).
+            v0 = np.random.default_rng(self.random_state).standard_normal(min(G.shape))
+            _, _, vt = svds(G, k=1, v0=v0)
+            return ((G @ vt[0]) ** 2).astype(np.float32)
+        except Exception as e:
+            print(f"[RPFExtractor] _block_h failed: {type(e).__name__}: {e}")
+            return np.zeros(n, np.float32)

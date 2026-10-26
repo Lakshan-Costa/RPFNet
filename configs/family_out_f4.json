@@ -1,0 +1,198 @@
+{
+  "name": "family_out_f4",
+  "datasets": [
+    "breast_cancer",
+    "wine",
+    "digits",
+    "california_large",
+    "adult",
+    "credit_g",
+    "california_reg",
+    "diabetes_reg",
+    "boston_reg",
+    "ionosphere",
+    "spambase",
+    "vehicle",
+    "segment",
+    "pendigits",
+    "satimage",
+    "waveform",
+    "glass",
+    "yeast",
+    "page_blocks",
+    "vowel",
+    "optdigits",
+    "steel_plates",
+    "mfeat_factors",
+    "cardiotocography",
+    "abalone_reg",
+    "energy_reg",
+    "moons",
+    "syn_hd",
+    "friedman_reg",
+    "nigerian_fraud",
+    "bank_marketing",
+    "loan_data"
+  ],
+  "max_rows": 10000,
+  "n_jobs": null,
+  "protocol": {
+    "scheme": "family_out",
+    "n_folds": 5,
+    "seed": 0,
+    "eval_fold": 4
+  },
+  "train": {
+    "feature_version": 3,
+    "attacks": [
+      "label_flip",
+      "tree_aware",
+      "grad_flip",
+      "boundary_flip",
+      "gauss_noise",
+      "interpolation",
+      "targeted_class",
+      "clean_label",
+      "badnets",
+      "null_feature",
+      "feat_perturb",
+      "badnets_heavy",
+      "repr_inversion",
+      "dist_shift",
+      "outlier_inject",
+      "feat_dropout"
+    ],
+    "attacks_reg": [
+      "target_shift",
+      "leverage_attack",
+      "target_flip_extreme",
+      "feat_perturb",
+      "badnets",
+      "repr_inversion",
+      "dist_shift",
+      "feat_dropout",
+      "outlier_inject",
+      "gauss_noise"
+    ],
+    "rates": [
+      0.01,
+      0.05,
+      0.1,
+      0.2
+    ],
+    "seeds": 2,
+    "epochs": 30,
+    "batch_size": 512,
+    "lr": 0.001,
+    "seed": 0,
+    "context": true,
+    "scorer": "trees"
+  },
+  "eval": {
+    "attacks": [
+      "label_flip",
+      "clean_label",
+      "badnets",
+      "feat_perturb",
+      "repr_inversion",
+      "dist_shift",
+      "boundary_flip",
+      "feat_dropout"
+    ],
+    "attacks_reg": [
+      "target_shift",
+      "leverage_attack",
+      "target_flip_extreme",
+      "feat_perturb",
+      "badnets",
+      "repr_inversion",
+      "dist_shift",
+      "feat_dropout"
+    ],
+    "unseen_attacks": [
+      "influence_lr",
+      "subpopulation",
+      "adaptive_dup",
+      "catback"
+    ],
+    "rates": [
+      0.005,
+      0.01,
+      0.05,
+      0.1,
+      0.2
+    ],
+    "seeds": 3,
+    "baselines": [
+      "IsoForest",
+      "LOF",
+      "OCSVM",
+      "SpecSig",
+      "GradNorm",
+      "SEVER",
+      "GradSpectral",
+      "kNNLabel",
+      "kNNDist",
+      "ConfidentLearning",
+      "ECOD",
+      "IsoForest+CL",
+      "AE-Recon",
+      "TRIM",
+      "iTRIM",
+      "ECOD+CL"
+    ],
+    "fdr_q": 0.1,
+    "downstream": false,
+    "signal_baselines": false,
+    "minp": false,
+    "stack": false
+  },
+  "ablation": {
+    "n_splits": 1,
+    "train_seeds": 3
+  },
+  "stability": {
+    "attacks": [
+      "label_flip",
+      "badnets"
+    ],
+    "rate": 0.1,
+    "n_rep": 5
+  },
+  "diagnostics": {
+    "rates": [
+      0.05,
+      0.1
+    ],
+    "seeds": 1
+  },
+  "adaptive": {
+    "lams": [
+      0,
+      0.5,
+      1,
+      2,
+      5
+    ],
+    "iters": 30,
+    "base": "label_flip",
+    "rate": 0.1,
+    "seeds": 2,
+    "max_n": 3000,
+    "baselines": [
+      "IsoForest",
+      "ConfidentLearning",
+      "kNNLabel",
+      "SEVER"
+    ]
+  },
+  "scaling": {
+    "n": [
+      1000,
+      10000,
+      100000
+    ],
+    "d": 20
+  },
+  "variants": {}
+}

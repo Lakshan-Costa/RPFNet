@@ -3,7 +3,6 @@ import os
 import json
 from Backend.RPFNet.InvariantAnalyzer import (
     InvariantAnalyzer,
-    GaussianMixtureBounds,
     synthetic_validation,
 )
 
@@ -85,24 +84,6 @@ def run_theoretical_analysis(RPFNet_data, eval_ds, grand_results,
     )
     analyzer.print_transferability_report(trans_results)
 
-    # PART 4: Theoretical Bounds
-    print("\n" + "-" * W)
-    print("  PART 4: Theoretical Bounds (for paper Section IV)")
-    print("-" * W)
-
-    # Show bounds at different regimes
-    for setting_name, params in [
-        ("Low-dim binary (Breast Cancer-like)",
-         {"delta": 3.0, "sigma": 1.0, "k": 15, "d": 30, "n": 500, "K": 2}),
-        ("High-dim multiclass (Digits-like)",
-         {"delta": 2.0, "sigma": 1.0, "k": 15, "d": 64, "n": 1500, "K": 10}),
-        ("Small-n (Glass-like)",
-         {"delta": 2.5, "sigma": 1.0, "k": 10, "d": 9, "n": 200, "K": 6}),
-    ]:
-        print(f"\n  Setting: {setting_name}")
-        GaussianMixtureBounds.print_bounds(**params)
-
-
     # SAVE RESULTS
     save_data = {
         "coverage_rate": coverage_results["coverage_rate"],
@@ -120,6 +101,7 @@ def run_theoretical_analysis(RPFNet_data, eval_ds, grand_results,
 
     save_data["complementarity"] = coverage_results["complementarity"]
     save_data["transferability"] = trans_results["summary"]
+    save_data["clean_control"] = coverage_results["clean_control"]
 
     os.makedirs("results", exist_ok=True)
     with open("results/invariant_analysis.json", "w") as f:
@@ -200,7 +182,7 @@ def generate_paper_table_transferability(trans_results):
     print("\n% LaTeX table - Transferability (KS statistics)")
     print("\\begin{table}[t]")
     print("\\centering")
-    print("\\caption{Cross-dataset KS statistics for rank-normalized")
+    print("\\caption{Cross-dataset KS statistics for standardised")
     print("invariant distributions (lower = more transferable).}")
     print("\\label{tab:transferability}")
     print("\\begin{tabular}{lccc}")
@@ -219,4 +201,4 @@ def generate_paper_table_transferability(trans_results):
 
 if __name__ == "__main__":
     print("\nRunning standalone synthetic validation...")
-    synthetic_validation(verbose=True)
+    synthetic_validation(verbose=True)

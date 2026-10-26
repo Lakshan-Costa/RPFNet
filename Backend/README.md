@@ -7,7 +7,7 @@ RPFNet is a Python library for detecting data poisoning attacks in tabular datas
 ## Installation
 
 ```bash
-pip install rpfnet
+pip install -e Backend
 pip install ucimlrepo  # only needed for UCI datasets
 ```
 

@@ -1,0 +1,141 @@
+{
+  "name": "quick_d5",
+  "datasets": [
+    "breast_cancer",
+    "wine",
+    "credit_g",
+    "ionosphere",
+    "vehicle",
+    "glass",
+    "yeast",
+    "steel_plates",
+    "cardiotocography",
+    "moons",
+    "syn_hd",
+    "spambase",
+    "bank_marketing",
+    "nigerian_fraud",
+    "diabetes_reg",
+    "boston_reg",
+    "energy_reg",
+    "friedman_reg"
+  ],
+  "max_rows": 2000,
+  "n_jobs": null,
+  "protocol": {
+    "scheme": "dataset_kfold",
+    "n_folds": 3,
+    "seed": 0
+  },
+  "train": {
+    "feature_version": 3,
+    "attacks": [
+      "label_flip",
+      "tree_aware",
+      "grad_flip",
+      "boundary_flip",
+      "gauss_noise",
+      "interpolation",
+      "targeted_class",
+      "clean_label",
+      "badnets",
+      "null_feature",
+      "feat_perturb",
+      "badnets_heavy",
+      "repr_inversion",
+      "dist_shift",
+      "outlier_inject",
+      "feat_dropout"
+    ],
+    "attacks_reg": [
+      "target_shift",
+      "leverage_attack",
+      "target_flip_extreme",
+      "feat_perturb",
+      "badnets",
+      "repr_inversion",
+      "dist_shift",
+      "feat_dropout",
+      "outlier_inject",
+      "gauss_noise"
+    ],
+    "rates": [
+      0.01,
+      0.05,
+      0.1,
+      0.2
+    ],
+    "seeds": 1,
+    "epochs": 30,
+    "batch_size": 512,
+    "lr": 0.001,
+    "seed": 0,
+    "context": true,
+    "scorer": "trees"
+  },
+  "eval": {
+    "attacks": [
+      "label_flip",
+      "clean_label",
+      "badnets",
+      "feat_perturb",
+      "dist_shift"
+    ],
+    "attacks_reg": [
+      "target_shift",
+      "leverage_attack",
+      "feat_perturb",
+      "dist_shift"
+    ],
+    "unseen_attacks": [
+      "influence_lr",
+      "subpopulation",
+      "adaptive_dup"
+    ],
+    "rates": [
+      0.005,
+      0.01,
+      0.05,
+      0.1
+    ],
+    "seeds": 2,
+    "baselines": [
+      "IsoForest",
+      "ECOD",
+      "kNNLabel",
+      "ConfidentLearning",
+      "SEVER",
+      "TRIM",
+      "iTRIM",
+      "ECOD+CL"
+    ],
+    "signal_baselines": true,
+    "minp": true,
+    "stack": true,
+    "fdr_q": 0.1,
+    "downstream": false
+  },
+  "adaptive": {
+    "lams": [
+      0,
+      1,
+      5
+    ],
+    "iters": 15,
+    "base": "label_flip",
+    "rate": 0.1,
+    "seeds": 1,
+    "max_n": 2000,
+    "baselines": [
+      "IsoForest",
+      "ConfidentLearning",
+      "kNNLabel",
+      "SEVER"
+    ]
+  },
+  "variants": {
+    "Net": {
+      "scorer": "net"
+    }
+  }
+}

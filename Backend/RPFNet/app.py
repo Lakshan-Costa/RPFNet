@@ -1,13 +1,4 @@
-"""
-Endpoints
-GET  /health
-GET  /thresholds
-POST /analyze_csv
-POST /analyze_uci
-POST /analyze_url
-POST /export_clean
-POST /analyze_stream
-"""
+"""Web API for the detector."""
 
 from __future__ import annotations
 

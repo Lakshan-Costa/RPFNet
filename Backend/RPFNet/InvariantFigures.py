@@ -114,11 +114,7 @@ def _set_style():
 
 #  ABLATION
 def _ablate_invariant_permute(rpf, block_keys, block_names_dict, rng):
-    """
-    Permutation-ablate: shuffle columns belonging to the given blocks.
-    Each column is independently permuted across samples.
-    Returns (ablated_rpf, number_of_permuted_columns).
-    """
+    """Permutation-ablate."""
     rpf_abl = rpf.copy()
     n_cols = 0
     for blk_key in block_keys:

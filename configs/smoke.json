@@ -1,0 +1,114 @@
+{
+  "name": "smoke",
+  "datasets": [
+    "breast_cancer",
+    "wine",
+    "digits",
+    "moons",
+    "syn_hd",
+    "diabetes_reg",
+    "friedman_reg",
+    "bank_marketing"
+  ],
+  "max_rows": 2000,
+  "protocol": {
+    "scheme": "dataset_kfold",
+    "n_folds": 2,
+    "seed": 0
+  },
+  "train": {
+    "feature_version": 2,
+    "attacks": [
+      "label_flip",
+      "gauss_noise",
+      "clean_label",
+      "badnets",
+      "feat_perturb",
+      "dist_shift"
+    ],
+    "attacks_reg": [
+      "target_shift",
+      "feat_perturb",
+      "badnets"
+    ],
+    "rates": [
+      0.05,
+      0.1,
+      0.2
+    ],
+    "seeds": 1,
+    "epochs": 5,
+    "batch_size": 512,
+    "lr": 0.001,
+    "seed": 0
+  },
+  "eval": {
+    "attacks": [
+      "label_flip",
+      "badnets",
+      "feat_dropout"
+    ],
+    "attacks_reg": [
+      "target_shift",
+      "dist_shift"
+    ],
+    "unseen_attacks": [
+      "influence_lr",
+      "adaptive_dup"
+    ],
+    "rates": [
+      0.01,
+      0.1
+    ],
+    "seeds": 2,
+    "baselines": [
+      "IsoForest",
+      "ConfidentLearning",
+      "kNNLabel",
+      "SEVER",
+      "ECOD",
+      "TRIM"
+    ],
+    "fdr_q": 0.1,
+    "downstream": true
+  },
+  "ablation": {
+    "n_splits": 1,
+    "train_seeds": 2
+  },
+  "stability": {
+    "attacks": [
+      "label_flip"
+    ],
+    "rate": 0.1,
+    "n_rep": 3
+  },
+  "diagnostics": {
+    "rates": [
+      0.1
+    ],
+    "seeds": 1
+  },
+  "adaptive": {
+    "lams": [
+      0,
+      2
+    ],
+    "iters": 5,
+    "base": "label_flip",
+    "rate": 0.1,
+    "seeds": 1,
+    "max_n": 800,
+    "baselines": [
+      "IsoForest",
+      "kNNLabel"
+    ]
+  },
+  "scaling": {
+    "n": [
+      1000,
+      5000
+    ],
+    "d": 20
+  }
+}

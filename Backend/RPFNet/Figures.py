@@ -136,10 +136,7 @@ def _get_color(d):
 
 #  FIGURE 1 — F1 Heatmap: Attacks × Detectors (per dataset or grand)
 def plot_f1_heatmap(grand_results, eval_ds, mode_key="unknown"):
-    """
-    One heatmap per dataset: rows = attacks, cols = detectors, cell = F1.
-    Also produces a grand-average heatmap across all datasets.
-    """
+    """One heatmap per dataset."""
     for ds_disp, ds_res in grand_results.items():
         valid = {k: v for k, v in ds_res.items() if v}
         if not valid:
@@ -214,10 +211,7 @@ def plot_f1_heatmap(grand_results, eval_ds, mode_key="unknown"):
 
 #  FIGURE 2 — Grouped Bar: Detector comparison across poison rates
 def plot_rate_comparison(grand_results, mode_key="unknown"):
-    """
-    For each rate, show average F1 of each detector across all
-    datasets/attacks at that rate. Grouped bar chart.
-    """
+    """For each rate, show average F1 of each detector across all datasets/attacks at that rate."""
     all_dets = []
     for dr in grand_results.values():
         for res in dr.values():
@@ -268,10 +262,7 @@ def plot_rate_comparison(grand_results, mode_key="unknown"):
 
 #  FIGURE 3 — Ablation Study Bar Chart (Block Importance)
 def plot_ablation(meta_det, eval_ds):
-    """
-    Bar chart showing F1 drop when each RPF block is zeroed out,
-    averaged across datasets.
-    """
+    """Bar chart showing F1 drop when each RPF block is zeroed out, averaged across datasets."""
     block_drops_all = {b: [] for b in RPFExtractor.BLOCK_NAMES}
 
     for ds_key, dsinfo in eval_ds.items():
@@ -328,10 +319,7 @@ def plot_ablation(meta_det, eval_ds):
 
 #  FIGURE 4 - ROC Curves (Hybrid vs baselines, representative attack)
 def plot_roc_curves(meta_det, hybrid_det, eval_ds):
-    """
-    ROC curves for Hybrid, MetaPoison, IsoForest on a representative
-    dataset + attack. Picks the first classification dataset available.
-    """
+    """ROC curves for Hybrid, MetaPoison, IsoForest on a representative dataset + attack."""
     # Pick a representative dataset
     ds_key = None
     for k, v in eval_ds.items():
@@ -400,10 +388,7 @@ def plot_roc_curves(meta_det, hybrid_det, eval_ds):
 
 #  FIGURE 5 — Box Plot: F1 Distribution per Detector
 def plot_f1_boxplot(grand_results, mode_key="unknown"):
-    """
-    Box plot showing F1 distribution across all attacks/rates for
-    each detector. Highlights spread and robustness.
-    """
+    """Box plot showing F1 distribution across all attacks/rates for each detector."""
     all_dets = []
     for dr in grand_results.values():
         for res in dr.values():
@@ -454,10 +439,7 @@ def plot_f1_boxplot(grand_results, mode_key="unknown"):
 
 #  FIGURE 6 - Flip vs No-Flip Attack Comparison
 def plot_flip_vs_noflip(grand_results, mode_key="unknown"):
-    """
-    Grouped bars: each detector's mean F1 on flip attacks vs no-flip
-    attacks. This highlights TRIM/iTRIM's known weakness.
-    """
+    """Grouped bars."""
     all_dets = []
     for dr in grand_results.values():
         for res in dr.values():
@@ -505,9 +487,7 @@ def plot_flip_vs_noflip(grand_results, mode_key="unknown"):
 
 #  FIGURE 7 — Zero-Shot vs Seen Dataset Performance
 def plot_zeroshot_vs_seen(grand_results, eval_ds, mode_key="unknown"):
-    """
-    Compares mean F1 for seen (meta-trained) vs zero-shot datasets.
-    """
+    """Compares mean F1 for seen (meta-trained) vs zero-shot datasets."""
     all_dets = []
     for dr in grand_results.values():
         for res in dr.values():
@@ -557,10 +537,7 @@ def plot_zeroshot_vs_seen(grand_results, eval_ds, mode_key="unknown"):
 
 #  FIGURE 8 — Feature Importance (RPF dimensions)
 def plot_feature_importance(meta_det, eval_ds):
-    """
-    Gradient-based feature importance across RPF dimensions,
-    color-coded by block.
-    """
+    """Gradient-based feature importance across RPF dimensions, color-coded by block."""
     all_imp = []
     for ds_key, dsinfo in eval_ds.items():
         try:
@@ -614,10 +591,7 @@ def plot_feature_importance(meta_det, eval_ds):
 
 #  FIGURE 9 — Rate Estimation Calibration (estimated vs true rate)
 def plot_rate_calibration(meta_det, eval_ds):
-    """
-    Scatter: true poison rate vs estimated rate. Perfect calibration
-    = diagonal line.
-    """
+    """Scatter."""
     true_rates = []
     est_rates = []
 
@@ -675,9 +649,7 @@ def plot_rate_calibration(meta_det, eval_ds):
 
 #  FIGURE 10 — Radar Chart: Detector profiles across attack families
 def plot_radar(grand_results, mode_key="unknown"):
-    """
-    Radar/spider chart comparing top detectors across attack categories.
-    """
+    """Radar/spider chart comparing top detectors across attack categories."""
     # Group attacks into families
     families = {
         "Label Flip": ["label_flip", "boundary_flip", "targeted_class",
@@ -745,10 +717,7 @@ def plot_radar(grand_results, mode_key="unknown"):
 
 #  FIGURE 11 — Classification vs Regression dataset performance
 def plot_cls_vs_reg(grand_results, eval_ds, mode_key="unknown"):
-    """
-    Compares detector F1 on classification vs regression datasets.
-    Only relevant if regression datasets exist.
-    """
+    """Compares detector F1 on classification vs regression datasets."""
     cls_disps = {v["display"] for v in eval_ds.values() if not v.get("is_regression")}
     reg_disps = {v["display"] for v in eval_ds.values() if v.get("is_regression")}
 
@@ -804,10 +773,7 @@ def plot_cls_vs_reg(grand_results, eval_ds, mode_key="unknown"):
 
 #  FIGURE 12 — Score Distribution (clean vs poison)
 def plot_score_distributions(meta_det, hybrid_det, eval_ds):
-    """
-    Overlapping histograms of Hybrid scores for clean vs poisoned points.
-    Shows separation quality on a representative attack.
-    """
+    """Overlapping histograms of Hybrid scores for clean vs poisoned points."""
     ds_key = None
     for k, v in eval_ds.items():
         if not v.get("is_regression", False):
@@ -874,21 +840,7 @@ def generate_all_figures(grand_results, eval_ds, meta_det, hybrid_det):
     print("  GENERATING PAPER FIGURES")
     print("=" * 82)
 
-    # plot_f1_heatmap(grand_results, eval_ds, "unknown")
-    # plot_f1_heatmap(grand_results, eval_ds, "known")
-    # plot_rate_comparison(grand_results, "unknown")
-    # plot_rate_comparison(grand_results, "known")
     plot_ablation(meta_det, eval_ds)
-    # plot_roc_curves(meta_det, hybrid_det, eval_ds)
-    # plot_f1_boxplot(grand_results, "unknown")
-    # plot_f1_boxplot(grand_results, "known")
-    # plot_flip_vs_noflip(grand_results, "unknown")
-    # plot_zeroshot_vs_seen(grand_results, eval_ds, "unknown")
-    # plot_feature_importance(meta_det, eval_ds)
-    # plot_rate_calibration(meta_det, eval_ds)
-    # plot_radar(grand_results, "unknown")
-    # plot_cls_vs_reg(grand_results, eval_ds, "unknown")
-    # plot_score_distributions(meta_det, hybrid_det, eval_ds)
 
     print(f"\n  ✓ All figures saved to {PLOT_DIR}/")
     print("=" * 82)

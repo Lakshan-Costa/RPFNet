@@ -47,11 +47,7 @@ def _split_scale_reg(X, y, seed=42):
 
 
 def _load_openml_classification(data_id, name, max_n=5000, seed=42):
-    """
-    Generic OpenML classification dataset loader.
-    Handles mixed types, missing values, subsampling, and returns
-    the standard 8-tuple.
-    """
+    """Generic OpenML classification dataset loader."""
     bundle = fetch_openml(data_id=data_id, as_frame=True, parser='auto')
     df = bundle.frame.copy()
     tgt_name = bundle.target.name if hasattr(bundle.target, 'name') else 'class'
@@ -90,6 +86,7 @@ def _load_openml_classification(data_id, name, max_n=5000, seed=42):
 
 
 def load_builtin(name):
+    """Returns (X_train, X_test, y_train, y_test, extra, scaler, is_regression, y_train_cont)."""
     is_regression = False
     y_cont = None
 
@@ -110,7 +107,7 @@ def load_builtin(name):
         is_regression = True
         print(f"\n  [builtin:{name}] {desc}  train={Xtr.shape}  "
               f"balance={ytr.mean():.2f}  [REGRESSION→binarized]")
-        return Xtr, Xte, ytr, yte, [], sc, is_regression, ytr_cont
+        return Xtr, Xte, ytr, yte, yte_cont, sc, is_regression, ytr_cont
 
     elif name == "diabetes_reg":
         d = load_diabetes()
@@ -123,7 +120,7 @@ def load_builtin(name):
         is_regression = True
         print(f"\n  [builtin:{name}] {desc}  train={Xtr.shape}  "
               f"balance={ytr.mean():.2f}  [REGRESSION→binarized]")
-        return Xtr, Xte, ytr, yte, [], sc, is_regression, ytr_cont
+        return Xtr, Xte, ytr, yte, yte_cont, sc, is_regression, ytr_cont
 
     elif name == "boston_reg":
         # Synthetic stand-in since real Boston is deprecated
@@ -139,7 +136,7 @@ def load_builtin(name):
         is_regression = True
         print(f"\n  [builtin:{name}] {desc}  train={Xtr.shape}  "
               f"balance={ytr.mean():.2f}  [REGRESSION→binarized]")
-        return Xtr, Xte, ytr, yte, [], sc, is_regression, ytr_cont
+        return Xtr, Xte, ytr, yte, yte_cont, sc, is_regression, ytr_cont
 
     elif name == "friedman_reg":
         X, y_raw = make_friedman1(n_samples=2000, n_features=10,
@@ -153,7 +150,7 @@ def load_builtin(name):
         is_regression = True
         print(f"\n  [builtin:{name}] {desc}  train={Xtr.shape}  "
               f"balance={ytr.mean():.2f}  [REGRESSION→binarized]")
-        return Xtr, Xte, ytr, yte, [], sc, is_regression, ytr_cont
+        return Xtr, Xte, ytr, yte, yte_cont, sc, is_regression, ytr_cont
 
     elif name == "abalone_reg":
         bundle = fetch_openml(data_id=183, as_frame=True, parser='auto')
@@ -179,7 +176,7 @@ def load_builtin(name):
         is_regression = True
         print(f"\n  [builtin:{name}] {desc}  train={Xtr.shape}  "
               f"balance={ytr.mean():.2f}  [REGRESSION→binarized]")
-        return Xtr, Xte, ytr, yte, [], sc, is_regression, ytr_cont
+        return Xtr, Xte, ytr, yte, yte_cont, sc, is_regression, ytr_cont
 
     elif name == "energy_reg":
         X, y_raw = make_regression(n_samples=1500, n_features=8,
@@ -194,7 +191,7 @@ def load_builtin(name):
         is_regression = True
         print(f"\n  [builtin:{name}] {desc}  train={Xtr.shape}  "
               f"balance={ytr.mean():.2f}  [REGRESSION→binarized]")
-        return Xtr, Xte, ytr, yte, [], sc, is_regression, ytr_cont
+        return Xtr, Xte, ytr, yte, yte_cont, sc, is_regression, ytr_cont
 
     elif name == "ionosphere":
         return _load_openml_classification(data_id=59, name="Ionosphere")
@@ -420,4 +417,4 @@ def load_csv(path, target_col=None):
     Xtr = sc.fit_transform(Xtr).astype(np.float32)
     Xte = sc.transform(Xte).astype(np.float32)
     print(f" Features: {X.shape[1]}  Train: {Xtr.shape}  Balance: {ytr.mean():.2f}")
-    return Xtr, Xte, ytr, yte, list(Xdf.columns), sc, False, None
+    return Xtr, Xte, ytr, yte, list(Xdf.columns), sc, False, None

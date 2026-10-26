@@ -1,15 +1,20 @@
-datasets==4.5.0
-faiss==1.5.3
-Flask==3.1.3
-flask_cors==6.0.2
-flask_limiter==4.1.1
-matplotlib==3.5.2
-numpy==2.4.4
-pandas==3.0.2
-requests==2.32.5
-scikit_learn==1.8.0
-scipy==1.17.1
-seaborn==0.13.2
-setuptools==57.4.0
+# Direct dependencies, pinned to the environment the experiments were run in
+# (Python 3.10, Windows). Install with: py -3.10 -m pip install -r requirements.txt
+# torch is the CUDA 12.1 build; for a CPU-only machine replace the two torch
+# lines with: torch==2.5.1 --index-url https://download.pytorch.org/whl/cpu
+--extra-index-url https://download.pytorch.org/whl/cu121
 torch==2.5.1+cu121
+numpy==1.26.4
+scipy==1.15.3
+scikit-learn==1.7.2
+pandas==2.3.3
+faiss-cpu==1.13.2
+datasets==4.5.0
 ucimlrepo==0.0.7
+matplotlib==3.5.2
+seaborn==0.12.1
+Flask==3.1.3
+flask-cors==6.0.2
+Flask-Limiter==4.1.1
+requests==2.32.5
+pytest==9.1.1

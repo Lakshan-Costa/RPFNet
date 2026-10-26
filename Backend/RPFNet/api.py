@@ -819,12 +819,7 @@ def stream_reset() -> None:
 
 
 def stream_retrain() -> None:
-    """
-    Force retrain the stream model on the current buffer.
-
-    Use this after concept drift or when the baseline becomes stale.
-    Raises RuntimeError if the buffer is smaller than the warmup threshold.
-    """
+    """Force retrain the stream model on the current buffer."""
     if len(_stream.buffer) < _stream.warmup:
         raise RuntimeError(
             f"Need >= {_stream.warmup} samples to retrain.  "
